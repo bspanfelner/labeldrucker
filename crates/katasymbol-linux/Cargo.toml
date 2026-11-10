@@ -1,0 +1,11 @@
+[package]
+name = "katasymbol-linux"
+description = "Linux BLE link for katasymbol-core over a raw LE L2CAP ATT socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katasymbol-core.workspace = true
+libc = "0.2"

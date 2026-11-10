@@ -1,0 +1,18 @@
+[package]
+name = "katasymbol-cli"
+description = "Command-line tool to probe and print on Katasymbol E16 label printers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "katasymbol"
+path = "src/main.rs"
+
+[dependencies]
+katasymbol-core.workspace = true
+katasymbol-linux.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+pollster = "0.4"

@@ -1,0 +1,12 @@
+[package]
+name = "katasymbol-core"
+description = "Platform-independent protocol, rendering and print flow for Katasymbol/Supvan E16 label printers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Pure-Rust LZMA (port of the Java SDK the vendor app uses) — builds for WASM and iOS.
+lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "encoder"] }
+thiserror.workspace = true
