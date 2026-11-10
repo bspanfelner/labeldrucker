@@ -1,2 +1,3 @@
 /target
 *.pklg
+/web/pkg

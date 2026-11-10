@@ -11,7 +11,7 @@ Targets: Linux, macOS, iOS and Web.
 | `katasymbol-linux` – BLE link (raw LE L2CAP ATT socket) | working |
 | `katasymbol-cli` – `probe`, `test`, `image` | working |
 | macOS/iOS link (CoreBluetooth, e.g. via `btleplug`) | todo |
-| Web link (Web Bluetooth via `web-sys`) | todo |
+| `katasymbol-web` – Web Bluetooth link + `web/` page (text, image, test pattern) | builds; hardware test pending |
 | GUI | todo |
 
 ## Usage (Linux)
@@ -27,6 +27,20 @@ export KATASYMBOL_ADDR=A4:93:40:3E:7B:0C
 No root and no pairing are needed. Turn off Bluetooth on phones that may hold the
 printer's connection; the E16 accepts one connection at a time and powers off
 after a few idle minutes.
+
+## Usage (Web)
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.130   # must match Cargo.lock
+./web/build.sh
+python3 -m http.server -d web 8080                  # open http://localhost:8080 in Chrome/Edge
+```
+
+Web Bluetooth needs Chrome or Edge and a secure context (`localhost` or HTTPS). On Linux,
+enable `chrome://flags/#enable-experimental-web-platform-features` if `navigator.bluetooth`
+is missing; the Chromium snap also needs `sudo snap connect chromium:bluez`. Safari and
+Firefox have no Web Bluetooth (iOS: Bluefy browser, or the native app).
 
 ## Protocol summary (E16 / T16)
 

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Katasymbol E16</title>
+<style>
+  :root { --bg:#f6f6f4; --fg:#1d1d1b; --muted:#6b6b66; --card:#fff; --line:#d9d9d4; --accent:#1f5fd6; --err:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --fg:#ececea; --muted:#9a9a94; --card:#20201f; --line:#3a3a37; --accent:#6c9cff; --err:#ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
+  input, select, button, textarea { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  textarea { width:100%; resize:vertical; min-height:3.2em; }
+  input[type=number] { width: 6em; }
+  button { cursor:pointer; background:var(--accent); color:#fff; border-color:transparent; padding:8px 14px; }
+  button.secondary { background:transparent; color:var(--fg); border-color:var(--line); }
+  button:disabled { opacity:.45; cursor:default; }
+  #info { color:var(--muted); font-size:13px; margin-top:10px; white-space:pre-line; }
+  #msg { margin-top:10px; min-height:1.4em; }
+  #msg.err { color:var(--err); }
+  .preview { overflow-x:auto; padding:12px 0 4px; }
+  #preview { image-rendering: pixelated; border:1px dashed var(--line); background:#fff; display:block; }
+  .hint { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Katasymbol E16</h1>
+
+  <section>
+    <div class="row">
+      <button id="connect">Verbinden</button>
+      <button id="disconnect" class="secondary" disabled>Trennen</button>
+    </div>
+    <div id="info">Nicht verbunden.</div>
+  </section>
+
+  <section>
+    <label>Text <textarea id="text">Hallo E16</textarea></label>
+    <div class="row" style="margin-top:12px">
+      <label>Schrift
+        <select id="font">
+          <option value="system-ui, sans-serif">Sans</option>
+          <option value="Georgia, serif">Serif</option>
+          <option value="ui-monospace, monospace">Mono</option>
+        </select>
+      </label>
+      <label>Größe (px) <input id="size" type="number" min="8" max="96" value="56"></label>
+      <label>Fett <input id="bold" type="checkbox" checked></label>
+      <label>Rahmen <input id="frame" type="checkbox"></label>
+      <label>Länge (mm) <input id="length" type="number" min="5" max="200" value="40"></label>
+      <label>Dichte <input id="density" type="number" min="1" max="7" value="4"></label>
+      <label>Schwelle <input id="threshold" type="number" min="1" max="255" value="128"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label>Oder Bild <input id="image" type="file" accept="image/*"></label>
+      <button id="clearimg" class="secondary" disabled>Bild entfernen</button>
+    </div>
+    <div class="preview"><canvas id="preview"></canvas></div>
+    <div class="hint">Vorschau in Druckauflösung (8 Punkte/mm, 96 Punkte = 12 mm hoch), doppelt vergrößert.</div>
+    <div class="row" style="margin-top:12px">
+      <button id="print" disabled>Drucken</button>
+      <button id="test" class="secondary" disabled>Testmuster</button>
+    </div>
+    <div id="msg"></div>
+  </section>
+</main>
+
+<script type="module">
+import init, { E16, head_dots } from "./pkg/katasymbol_web.js";
+
+await init();
+const H = head_dots();         // 96
+const DOTS_PER_MM = 8;
+const SCALE = 2;
+const $ = (id) => document.getElementById(id);
+let printer = null;
+let image = null;
+let busy = false;
+
+const work = document.createElement("canvas");
+
+function msg(text, err = false) {
+  $("msg").textContent = text;
+  $("msg").className = err ? "err" : "";
+}
+
+function updateButtons() {
+  const on = !!printer && !busy;
+  $("print").disabled = !on;
+  $("test").disabled = !on;
+  $("disconnect").disabled = !printer || busy;
+  $("connect").disabled = !!printer || busy;
+}
+
+// Draw the label in print resolution: width = length along the tape, height = head.
+function render() {
+  const w = Math.max(1, Math.round(+$("length").value * DOTS_PER_MM));
+  work.width = w; work.height = H;
+  const c = work.getContext("2d", { willReadFrequently: true });
+  c.fillStyle = "#fff"; c.fillRect(0, 0, w, H);
+  c.fillStyle = "#000"; c.strokeStyle = "#000";
+  if (image) {
+    const s = Math.min(H / image.height, w / image.width);
+    const iw = image.width * s, ih = image.height * s;
+    c.drawImage(image, (w - iw) / 2, (H - ih) / 2, iw, ih);
+  } else {
+    const lines = $("text").value.split("\n");
+    const size = +$("size").value;
+    c.font = `${$("bold").checked ? "bold " : ""}${size}px ${$("font").value}`;
+    c.textAlign = "center"; c.textBaseline = "middle";
+    const lh = size * 1.1;
+    const top = H / 2 - (lh * (lines.length - 1)) / 2;
+    lines.forEach((l, i) => c.fillText(l, w / 2, top + i * lh, w - 8));
+  }
+  if ($("frame").checked) { c.lineWidth = 3; c.strokeRect(1.5, 1.5, w - 3, H - 3); }
+
+  const data = c.getImageData(0, 0, w, H).data;
+  const gray = new Uint8Array(w * H);
+  for (let i = 0; i < gray.length; i++) {
+    gray[i] = (data[4*i] * 299 + data[4*i+1] * 587 + data[4*i+2] * 114) / 1000;
+  }
+  // Preview exactly what prints: the thresholded bitmap.
+  const t = +$("threshold").value;
+  const p = $("preview");
+  p.width = w; p.height = H;
+  p.style.width = `${w * SCALE}px`; p.style.height = `${H * SCALE}px`;
+  const pc = p.getContext("2d");
+  const out = pc.createImageData(w, H);
+  for (let i = 0; i < gray.length; i++) {
+    const v = gray[i] < t ? 0 : 255;
+    out.data.set([v, v, v, 255], 4 * i);
+  }
+  pc.putImageData(out, 0, 0);
+  return { w, gray };
+}
+
+async function job(fn) {
+  busy = true; updateButtons();
+  try { await fn(); }
+  catch (e) {
+    msg(e.message ?? String(e), true);
+    if (/disconnect/i.test(e.message ?? "")) { printer = null; $("info").textContent = "Verbindung verloren."; }
+  }
+  finally { busy = false; updateButtons(); }
+}
+
+async function refreshInfo() {
+  const i = await printer.probe();
+  const l = i.labels;
+  $("info").textContent =
+    `${i.name ?? "Drucker"} · ${i.status === "ready" ? "bereit" : i.status}` +
+    (l ? `\nEtiketten ${l.width} × ${l.length} mm, Abstand ${l.gap} mm` +
+         (l.remaining != null ? `, Zähler ${l.remaining}` : "") : "\nKeine Etiketten erkannt");
+  return i;
+}
+
+$("connect").onclick = () => job(async () => {
+  if (!navigator.bluetooth) throw new Error("Dieser Browser kann kein Web Bluetooth (Chrome/Edge nötig).");
+  msg("Verbinde …");
+  printer = await E16.connect();
+  const i = await refreshInfo();
+  if (i.labels?.length) { $("length").value = i.labels.length; render(); }
+  msg("Verbunden.");
+});
+
+$("disconnect").onclick = () => {
+  printer?.disconnect(); printer = null;
+  $("info").textContent = "Nicht verbunden."; msg(""); updateButtons();
+};
+
+$("print").onclick = () => job(async () => {
+  const { w, gray } = render();
+  await printer.print_gray(w, gray, +$("threshold").value, +$("density").value, msg);
+  msg("Fertig.");
+  await refreshInfo();
+});
+
+$("test").onclick = () => job(async () => {
+  await printer.print_test(+$("length").value, +$("density").value, msg);
+  msg("Fertig.");
+});
+
+$("image").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  image = await createImageBitmap(f);
+  $("clearimg").disabled = false;
+  render();
+};
+$("clearimg").onclick = () => { image = null; $("image").value = ""; $("clearimg").disabled = true; render(); };
+
+for (const id of ["text", "font", "size", "bold", "frame", "length", "threshold"]) {
+  $(id).addEventListener("input", render);
+}
+document.fonts?.ready.then(render);
+render();
+updateButtons();
+</script>
+</body>
+</html>
