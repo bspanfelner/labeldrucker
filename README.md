@@ -7,12 +7,12 @@ Targets: Linux, macOS, iOS and Web.
 
 | Part | State |
 |------|-------|
-| `katasymbol-core` – protocol, page bitmap, LZMA, print flow | working, tested on an E16; builds for `wasm32-unknown-unknown` and `aarch64-apple-ios` |
+| `katasymbol-core` – protocol, page bitmap, LZMA, text rendering, print flow | working, tested on an E16; builds for `wasm32-unknown-unknown` and `aarch64-apple-ios` |
 | `katasymbol-linux` – BLE link (raw LE L2CAP ATT socket) | working |
 | `katasymbol-cli` – `probe`, `test`, `image` | working |
 | macOS/iOS link (CoreBluetooth, e.g. via `btleplug`) | todo |
 | `katasymbol-web` – Web Bluetooth link + `web/` page (text, image, test pattern) | builds; hardware test pending |
-| GUI | todo |
+| `katasymbol-app` – desktop app (egui): text with system fonts, images, test pattern, preview, print | builds; hardware test pending |
 
 ## Usage (Linux)
 
@@ -27,6 +27,18 @@ export KATASYMBOL_ADDR=A4:93:40:3E:7B:0C
 No root and no pairing are needed. Turn off Bluetooth on phones that may hold the
 printer's connection; the E16 accepts one connection at a time and powers off
 after a few idle minutes.
+
+## Desktop app (Linux)
+
+```sh
+cargo run --release -p katasymbol-app
+```
+
+Enter the printer's Bluetooth address once (it is remembered in
+`~/.config/katasymbol/printer`), then *Verbinden*. Labels are designed as text (any
+system font, auto-fit), an image (drag a PNG/JPEG onto the window) or the test
+pattern; the preview shows the exact bitmap at 8 dots/mm. The app connects on
+demand and reconnects after the printer has powered off.
 
 ## Usage (Web)
 

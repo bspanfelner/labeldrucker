@@ -1,0 +1,19 @@
+[package]
+name = "katasymbol-app"
+description = "Desktop app to design and print labels on Katasymbol E16 printers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "katasymbol-app"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.32.3"
+fontdb = "0.24.0"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
+katasymbol-core.workspace = true
+katasymbol-linux.workspace = true
+pollster = "1.0.1"

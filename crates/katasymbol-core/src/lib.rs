@@ -18,6 +18,8 @@ pub mod page;
 pub mod printer;
 pub mod protocol;
 pub mod status;
+#[cfg(feature = "text")]
+pub mod text;
 
 pub use page::Page;
 pub use printer::{Link, Printer};

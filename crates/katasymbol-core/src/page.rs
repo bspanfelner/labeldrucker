@@ -75,6 +75,27 @@ impl Page {
         page
     }
 
+    /// The page turned by 180° (for printers fed the other way round).
+    pub fn rotated_180(&self) -> Self {
+        let w = self.width();
+        let mut p = Self::blank_dots(w);
+        for x in 0..w {
+            for y in 0..HEAD_DOTS {
+                if self.get(x, y) {
+                    p.set(w - 1 - x, HEAD_DOTS - 1 - y);
+                }
+            }
+        }
+        p
+    }
+
+    /// The page mirrored along the tape (left ↔ right).
+    pub fn mirrored(&self) -> Self {
+        let mut p = self.clone();
+        p.columns.reverse();
+        p
+    }
+
     /// A calibration pattern: 2-dot frame inset by 1 mm, an X from corner to
     /// corner, and 2 mm ticks every 5 mm along the top edge.
     pub fn test_pattern(length_mm: usize) -> Self {
@@ -101,5 +122,21 @@ impl Page {
     pub(crate) fn leading_blank(&self, limit: usize) -> usize {
         let first = self.columns.iter().take(limit).position(|c| c.iter().any(|&b| b != 0));
         first.unwrap_or(limit).saturating_sub(1).min(limit - 1)
+    }
+}
+
+#[cfg(test)]
+mod transform_tests {
+    use super::*;
+
+    #[test]
+    fn rotate_and_mirror() {
+        let mut p = Page::blank_dots(10);
+        p.set(1, 2);
+        let r = p.rotated_180();
+        assert!(r.get(8, HEAD_DOTS - 3) && !r.get(1, 2));
+        assert_eq!(r.rotated_180(), p);
+        let m = p.mirrored();
+        assert!(m.get(8, 2));
     }
 }
