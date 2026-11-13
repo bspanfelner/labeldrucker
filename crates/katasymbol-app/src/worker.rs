@@ -10,12 +10,14 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
 pub enum Cmd {
+    Scan,
     Probe { addr: String },
     Print { addr: String, page: Page, density: u8 },
     Disconnect,
 }
 
 pub enum Ev {
+    Found(Vec<crate::scan::Found>),
     Connected(bool),
     Info(Info),
     Progress(String),
@@ -61,6 +63,13 @@ struct State {
 impl State {
     fn handle(&mut self, cmd: Cmd, send: &dyn Fn(Ev)) {
         match cmd {
+            Cmd::Scan => {
+                send(Ev::Progress("Suche Drucker (8 s) …".into()));
+                match crate::scan::scan(8) {
+                    Ok(found) => send(Ev::Found(found)),
+                    Err(e) => send(Ev::Error(e)),
+                }
+            }
             Cmd::Disconnect => {
                 self.conn = None;
                 send(Ev::Connected(false));

@@ -2,6 +2,7 @@
 //! preview it at print resolution and print it on an E16 over BLE.
 
 mod render;
+mod scan;
 mod worker;
 
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
@@ -65,6 +66,7 @@ struct App {
     connected: bool,
     busy: bool,
     info: Option<Info>,
+    found: Vec<scan::Found>,
     message: Option<(String, bool)>,
 }
 
@@ -128,6 +130,7 @@ impl App {
             connected: false,
             busy: false,
             info: None,
+            found: Vec::new(),
             message: None,
         }
     }
@@ -206,6 +209,20 @@ impl App {
                         self.message = None;
                     }
                 }
+                Ev::Found(found) => {
+                    self.busy = false;
+                    let printers: Vec<_> = found.iter().filter(|f| f.likely).collect();
+                    self.message = Some(match printers.as_slice() {
+                        [] if found.is_empty() => ("Nichts gefunden. Ist der Drucker an?".into(), true),
+                        [] => ("Kein Drucker erkannt – bitte aus der Liste wählen.".into(), true),
+                        [p] => {
+                            self.addr = p.addr.clone();
+                            (format!("Drucker gefunden: {} – jetzt „Verbinden“.", p.name), false)
+                        }
+                        _ => ("Mehrere Drucker gefunden – bitte aus der Liste wählen.".into(), false),
+                    });
+                    self.found = found;
+                }
                 Ev::Progress(p) => self.message = Some((p, false)),
                 Ev::Printed => self.message = Some(("Gedruckt.".into(), false)),
                 Ev::Error(e) => {
@@ -226,11 +243,30 @@ impl App {
     fn printer_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Drucker");
-            ui.add(egui::TextEdit::singleline(&mut self.addr).hint_text("A4:93:40:3E:7B:0C").desired_width(150.0));
-            let ok = valid_addr(self.addr.trim());
-            if ui.add_enabled(ok && !self.busy, egui::Button::new("Verbinden")).clicked() {
+            ui.add(egui::TextEdit::singleline(&mut self.addr).hint_text("Adresse – oder „Suchen“").desired_width(150.0));
+            if !self.found.is_empty() {
+                egui::ComboBox::from_id_salt("found")
+                    .selected_text("Gefunden")
+                    .width(90.0)
+                    .show_ui(ui, |ui| {
+                        for f in &self.found {
+                            let label = format!("{}  {}{}", f.name, f.addr, if f.likely { "  ★" } else { "" });
+                            ui.selectable_value(&mut self.addr, f.addr.clone(), label);
+                        }
+                    });
+            }
+            if ui.add_enabled(!self.busy, egui::Button::new("Suchen")).clicked() {
+                self.busy = true;
+                self.message = None;
+                self.worker.send(Cmd::Scan);
+            }
+            if ui.add_enabled(!self.busy, egui::Button::new("Verbinden")).clicked() {
                 self.addr = self.addr.trim().to_uppercase();
-                self.request(Cmd::Probe { addr: self.addr.clone() });
+                if valid_addr(&self.addr) {
+                    self.request(Cmd::Probe { addr: self.addr.clone() });
+                } else {
+                    self.message = Some(("Keine gültige Adresse – erst „Suchen“ oder Adresse eintragen.".into(), true));
+                }
             }
             if ui.add_enabled(self.connected && !self.busy, egui::Button::new("Trennen")).clicked() {
                 self.worker.send(Cmd::Disconnect);
@@ -258,7 +294,7 @@ impl App {
             }
             ui.label(RichText::new(line).weak());
         } else if !valid_addr(self.addr.trim()) {
-            ui.label(RichText::new("Bluetooth-Adresse des Druckers eintragen (bluetoothctl devices).").weak());
+            ui.label(RichText::new("Drucker einschalten und „Suchen“ klicken (Handy-Bluetooth aus).").weak());
         }
     }
 
