@@ -56,6 +56,9 @@ async fn handle(cmd: Cmd, shared: Shared, send: &dyn Fn(Ev)) {
                         Err(e) => send(Ev::Error(e.to_string())),
                     }
                 }
+                Err(katasymbol_core::Error::Link(m)) if m == katasymbol_web::NOT_A_PRINTER => {
+                    send(Ev::Error(format!("{m}.")));
+                }
                 Err(e) => send(Ev::Error(format!(
                     "Keine Verbindung: {e}{}",
                     if all { "" } else { " – Drucker nicht in der Liste? Ist er an und mit keinem anderen Gerät verbunden? Sonst ⚙ → „Alle Geräte zeigen“." }

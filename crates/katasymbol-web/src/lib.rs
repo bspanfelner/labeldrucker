@@ -21,6 +21,8 @@ const WRITE: &str = "0000ffe9-0000-1000-8000-00805f9b34fb";
 /// Name prefixes of Katasymbol/Supvan printers: the E16 advertises its
 /// serial (`T0105A…`) and calls itself `T16` once connected.
 pub const NAME_PREFIXES: &[&str] = &["T0", "T1", "E1", "Katasymbol", "KATASYMBOL", "Supvan", "SUPVAN"];
+/// The error when the chosen device lacks the Supvan service.
+pub const NOT_A_PRINTER: &str = "Das gewählte Gerät ist kein Katasymbol-Drucker – bitte einen anderen Eintrag wählen";
 /// How often `recv` looks at the notification queue.
 const RECV_POLL_MS: i32 = 2;
 
@@ -87,7 +89,13 @@ impl WebLink {
         let gatt = device.gatt().ok_or_else(|| Error::Link("device has no GATT server".into()))?;
         let server: web_sys::BluetoothRemoteGattServer = JsFuture::from(gatt.connect()).await.map_err(js_err)?.unchecked_into();
         let service: web_sys::BluetoothRemoteGattService =
-            JsFuture::from(server.get_primary_service_with_str(SERVICE)).await.map_err(js_err)?.unchecked_into();
+            match JsFuture::from(server.get_primary_service_with_str(SERVICE)).await {
+                Ok(s) => s.unchecked_into(),
+                Err(_) => {
+                    gatt.disconnect();
+                    return Err(Error::Link(NOT_A_PRINTER.into()));
+                }
+            };
         let notify: BluetoothRemoteGattCharacteristic =
             JsFuture::from(service.get_characteristic_with_str(NOTIFY)).await.map_err(js_err)?.unchecked_into();
         let write: BluetoothRemoteGattCharacteristic =
