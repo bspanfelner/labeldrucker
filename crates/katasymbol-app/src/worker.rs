@@ -12,7 +12,7 @@ use std::thread;
 pub enum Cmd {
     Scan,
     Probe { addr: String },
-    Print { addr: String, page: Page, density: u8 },
+    Print { addr: String, page: Page, density: u8, copies: u32 },
     Disconnect,
 }
 
@@ -80,16 +80,24 @@ impl State {
                     Err(e) => send(Ev::Error(e)),
                 }
             }
-            Cmd::Print { addr, page, density } => {
-                let r = self.with_printer(&addr, send, |p| {
-                    pollster::block_on(p.print(&page, density, |pr| {
-                        send(Ev::Progress(match pr {
-                            Progress::Preparing => "Vorbereiten …".into(),
-                            Progress::Sending { buffer, of } => format!("Sende Teil {buffer}/{of} …"),
-                            Progress::Finishing => "Drucke …".into(),
+            Cmd::Print { addr, page, density, copies } => {
+                let copies = copies.max(1);
+                let mut r = Ok(());
+                for n in 1..=copies {
+                    let prefix = if copies > 1 { format!("Kopie {n}/{copies}: ") } else { String::new() };
+                    r = self.with_printer(&addr, send, |p| {
+                        pollster::block_on(p.print(&page, density, |pr| {
+                            send(Ev::Progress(match pr {
+                                Progress::Preparing => format!("{prefix}Vorbereiten …"),
+                                Progress::Sending { buffer, of } => format!("{prefix}Sende Teil {buffer}/{of} …"),
+                                Progress::Finishing => format!("{prefix}Drucke …"),
+                            }))
                         }))
-                    }))
-                });
+                    });
+                    if r.is_err() {
+                        break;
+                    }
+                }
                 match r {
                     Ok(()) => {
                         send(Ev::Printed);

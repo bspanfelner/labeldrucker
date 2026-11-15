@@ -1,8 +1,7 @@
-//! Turning the label design into a printable [`Page`].
+//! System fonts and pictures for the label design.
 
-use katasymbol_core::page::{DOTS_PER_MM, HEAD_DOTS};
-use katasymbol_core::text::{self, FontVec, TextLayout, VariableFont};
-use katasymbol_core::Page;
+use katasymbol_core::label::Picture;
+use katasymbol_core::text::{self, FontVec, VariableFont};
 use std::path::Path;
 
 /// System fonts, by family name.
@@ -32,16 +31,21 @@ impl Fonts {
             .unwrap_or_default()
     }
 
-    pub fn load(&self, family: &str, bold: bool) -> Option<FontVec> {
+    pub fn has(&self, family: &str) -> bool {
+        self.families.iter().any(|f| f == family)
+    }
+
+    pub fn load(&self, family: &str, bold: bool, italic: bool) -> Option<FontVec> {
         let weight = if bold { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL };
+        let style = if italic { fontdb::Style::Italic } else { fontdb::Style::Normal };
         let id = self.db.query(&fontdb::Query {
             families: &[fontdb::Family::Name(family)],
             weight,
+            style,
             ..Default::default()
         })?;
         let face_weight = self.db.face(id)?.weight;
-        let mut font =
-            self.db.with_face_data(id, |data, index| text::load_font(data.to_vec(), index).ok())??;
+        let mut font = self.db.with_face_data(id, |data, index| text::load_font(data.to_vec(), index).ok())??;
         // Variable fonts come as one face; select the weight on its axis.
         if face_weight != weight {
             font.set_variation(b"wght", f32::from(weight.0));
@@ -50,33 +54,20 @@ impl Fonts {
     }
 }
 
-/// Grayscale image fitted into `width` × 96, centred, white background.
-pub fn image_gray(path: &Path, width: usize) -> Result<Vec<u8>, String> {
-    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?.to_luma8();
-    let s = (HEAD_DOTS as f32 / img.height() as f32).min(width as f32 / img.width() as f32);
-    let (w, h) = (((img.width() as f32 * s).round() as u32).max(1), ((img.height() as f32 * s).round() as u32).max(1));
-    let img = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
-    let mut out = vec![255u8; width * HEAD_DOTS];
-    let (ox, oy) = ((width - w as usize) / 2, (HEAD_DOTS - h as usize) / 2);
-    for (x, y, p) in img.enumerate_pixels() {
-        out[(y as usize + oy) * width + x as usize + ox] = p.0[0];
-    }
-    Ok(out)
-}
-
-pub fn width_dots(length_mm: f32) -> usize {
-    ((length_mm * DOTS_PER_MM as f32).round() as usize).max(8)
-}
-
-pub fn text_gray(font: &FontVec, text: &str, width: usize, size_px: Option<f32>) -> Vec<u8> {
-    text::render(font, text, width, HEAD_DOTS, TextLayout { size_px, margin: 4.0 })
-}
-
-/// A 2-dot frame along the page edges.
-pub fn add_frame(page: &mut Page) {
-    let (w, h) = (page.width(), HEAD_DOTS);
-    page.fill_rect(0, 0, w, 2);
-    page.fill_rect(0, h - 2, w, h);
-    page.fill_rect(0, 0, 2, h);
-    page.fill_rect(w - 2, 0, w, h);
+/// Load an image as grayscale, downscaled to a sensible size for a 96-dot head.
+/// Transparent areas count as white.
+pub fn load_picture(path: &Path) -> Result<Picture, String> {
+    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let max_h = 384;
+    let img = if img.height() > max_h { img.resize(u32::MAX, max_h, image::imageops::FilterType::Triangle) } else { img };
+    let rgba = img.to_rgba8();
+    let gray = rgba
+        .pixels()
+        .map(|p| {
+            let [r, g, b, a] = p.0.map(u32::from);
+            let l = (r * 299 + g * 587 + b * 114) / 1000;
+            (255 - (255 - l) * a / 255) as u8
+        })
+        .collect();
+    Ok(Picture { width: rgba.width() as usize, height: rgba.height() as usize, gray, threshold: 128 })
 }

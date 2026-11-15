@@ -18,6 +18,11 @@ pub mod page;
 pub mod printer;
 pub mod protocol;
 pub mod status;
+pub mod draw;
+#[cfg(feature = "text")]
+pub mod icons;
+#[cfg(feature = "text")]
+pub mod label;
 #[cfg(feature = "text")]
 pub mod text;
 

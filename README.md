@@ -7,12 +7,12 @@ Targets: Linux, macOS, iOS and Web.
 
 | Part | State |
 |------|-------|
-| `katasymbol-core` – protocol, page bitmap, LZMA, text rendering, print flow | working, tested on an E16; builds for `wasm32-unknown-unknown` and `aarch64-apple-ios` |
+| `katasymbol-core` – protocol, page bitmap, LZMA, label layout (text, icons, frames), print flow | working, tested on an E16; builds for `wasm32-unknown-unknown` and `aarch64-apple-ios` |
 | `katasymbol-linux` – BLE link (raw LE L2CAP ATT socket) | working |
 | `katasymbol-cli` – `probe`, `test`, `image` | working |
 | macOS/iOS link (CoreBluetooth, e.g. via `btleplug`) | todo |
 | `katasymbol-web` – Web Bluetooth link + `web/` page (text, image, test pattern) | builds; hardware test pending |
-| `katasymbol-app` – desktop app (egui): text with system fonts, images, test pattern, preview, print | builds; hardware test pending |
+| `katasymbol-app` – desktop app (egui): text, images, pictograms, 13 frame styles, length control, copies | working (printed on an E16) |
 
 ## Usage (Linux)
 
@@ -34,11 +34,16 @@ after a few idle minutes.
 cargo run --release -p katasymbol-app
 ```
 
-Enter the printer's Bluetooth address once (it is remembered in
-`~/.config/katasymbol/printer`), then *Verbinden*. Labels are designed as text (any
-system font, auto-fit), an image (drag a PNG/JPEG onto the window) or the test
-pattern; the preview shows the exact bitmap at 8 dots/mm. The app connects on
-demand and reconnects after the printer has powered off.
+Click *Suchen* to find the printer (a short LE scan via `bluetoothctl`); the app
+connects on demand and reconnects after the printer has powered off. Labels are
+text (any system font, bold/italic, alignment, auto-fit) or an image (open or drag
+a PNG/JPEG), with up to two pictograms and one of 13 frame styles (thickness,
+margin, padding, radius). Length: −/+, presets, the loaded label's length,
+*Automatisch* (fits the content), or drag the handle on the label's end. The
+design, printer address, density and copies are remembered.
+
+`KATASYMBOL_SCREENSHOT=out.png` renders a demo design, saves a screenshot and quits
+(use the X11 backend, e.g. `env -u WAYLAND_DISPLAY`, when the window is hidden).
 
 ## Usage (Web)
 
@@ -69,6 +74,9 @@ Linux note: BlueZ's D-Bus `Connect()` links the dual-mode E16 over BR/EDR, so it
 GATT services never show up; hence the raw L2CAP socket instead of `bluer`/`btleplug`.
 
 ## Sources and credits
+
+- Pictograms: Font Awesome 4.7 by Dave Gandy (SIL OFL 1.1), bundled in
+  `crates/katasymbol-core/assets/`.
 
 - Shared Supvan framing and command set: [heeen/supvan-cups](https://github.com/heeen/supvan-cups)
   (MIT, © 2026 Florian Hänel).

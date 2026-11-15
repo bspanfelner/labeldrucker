@@ -10,9 +10,15 @@ rust-version.workspace = true
 ab_glyph = { version = "0.2.32", optional = true }
 # Pure-Rust LZMA (port of the Java SDK the vendor app uses) — builds for WASM and iOS.
 lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "encoder"] }
+serde = { version = "1", features = ["derive"], optional = true }
 thiserror.workspace = true
 
 [features]
 default = ["text"]
 # Text rasterising (pure Rust, also builds for WASM/iOS).
 text = ["dep:ab_glyph"]
+# Serialize label designs (Label, Frame, …).
+serde = ["dep:serde"]
+
+[dev-dependencies]
+image = { version = "0.25.9", default-features = false, features = ["png"] }
