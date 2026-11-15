@@ -50,7 +50,7 @@ async fn handle(cmd: Cmd, shared: Shared, send: &dyn Fn(Ev)) {
                     send(Ev::Connected(true));
                     let mut p = Printer::new(link);
                     let mut r = p.probe().await;
-                    // Not a single answer: try the other ATT write type.
+                    // Not a single answer: try the other ATT write type, keep it if it works.
                     if r.is_err() && katasymbol_web::diagnostics().events == 0 {
                         let other = !katasymbol_web::write_with_response();
                         katasymbol_web::set_write_with_response(other);

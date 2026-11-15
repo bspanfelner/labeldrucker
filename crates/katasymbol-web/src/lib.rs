@@ -45,7 +45,7 @@ async fn sleep_ms(ms: i32) {
 
 thread_local! {
     static DIAG: RefCell<Diag> = RefCell::new(Diag::default());
-    static WITH_RESPONSE: Cell<bool> = const { Cell::new(false) };
+    static WITH_RESPONSE: Cell<bool> = const { Cell::new(true) };
 }
 
 /// What happened on the link so far, to tell a browser that drops
@@ -70,9 +70,10 @@ fn diag(f: impl FnOnce(&mut Diag)) {
     DIAG.with(|d| f(&mut d.borrow_mut()));
 }
 
-/// Write with response (ATT Write Request) instead of the faster Write
-/// Command: a fallback for browsers whose write-without-response does not
-/// reach the printer.
+/// Write with response (ATT Write Request, the default) or the faster
+/// Write Command. iOS (Bluefy) silently drops Write Commands sent in quick
+/// succession, which leaves the printed label blank; requests are each
+/// acknowledged before the next goes out.
 pub fn set_write_with_response(on: bool) {
     WITH_RESPONSE.with(|w| w.set(on));
 }
