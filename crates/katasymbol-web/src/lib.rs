@@ -62,6 +62,40 @@ async fn sleep_ms(ms: i32) {
 thread_local! {
     static DIAG: RefCell<Diag> = RefCell::new(Diag::default());
     static WITH_RESPONSE: Cell<bool> = const { Cell::new(true) };
+    static TRACE: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
+}
+
+const TRACE_LINES: usize = 600;
+
+/// Record one line of the link trace (time in ms since page load).
+pub fn trace(line: impl AsRef<str>) {
+    let t = web_sys::window().and_then(|w| w.performance()).map_or(0.0, |p| p.now());
+    TRACE.with(|tr| {
+        let mut tr = tr.borrow_mut();
+        if tr.len() >= TRACE_LINES {
+            tr.pop_front();
+        }
+        tr.push_back(format!("{t:9.1} {}", line.as_ref()));
+    });
+}
+
+/// The link trace so far, one event per line, for bug reports.
+pub fn trace_text() -> String {
+    TRACE.with(|tr| tr.borrow().iter().cloned().collect::<Vec<_>>().join("\n"))
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// A write for the trace: short ones in full; long ones as head, tail and a
+/// checksum (enough to spot truncation, reordering or mangling).
+fn hex_short(b: &[u8]) -> String {
+    if b.len() <= 32 {
+        return hex(b);
+    }
+    let sum = b.iter().enumerate().fold(0u32, |a, (i, &x)| a.wrapping_add((i as u32 + 1) * u32::from(x)));
+    format!("{}…{} sum {sum}", hex(&b[..12]), hex(&b[b.len() - 4..]))
 }
 
 /// What happened on the link so far, to tell a browser that drops
@@ -202,6 +236,12 @@ impl WebLink {
     }
 
     pub async fn connect(device: BluetoothDevice) -> Result<Self> {
+        trace(format!(
+            "-- verbinde {} (Paket {} B, {})",
+            device.name().unwrap_or_default(),
+            chunk_size(),
+            if write_with_response() { "mit Antwort" } else { "ohne Antwort" }
+        ));
         let gatt = device.gatt().ok_or_else(|| Error::Link("device has no GATT server".into()))?;
         let server: web_sys::BluetoothRemoteGattServer = JsFuture::from(gatt.connect()).await.map_err(js_err)?.unchecked_into();
         let service: web_sys::BluetoothRemoteGattService =
@@ -262,7 +302,10 @@ impl WebLink {
 
         let connected = Rc::new(Cell::new(true));
         let c = connected.clone();
-        let on_disconnect = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| c.set(false));
+        let on_disconnect = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+            trace("-- Drucker hat die Verbindung getrennt");
+            c.set(false);
+        });
         device
             .add_event_listener_with_callback("gattserverdisconnected", on_disconnect.as_ref().unchecked_ref())
             .map_err(js_err)?;
@@ -305,10 +348,12 @@ impl Link for WebLink {
         match r {
             Ok(()) => {
                 diag(|d| d.writes_ok += 1);
+                trace(format!("W{} {:3} {}", if write_with_response() { "R" } else { "C" }, chunk.len(), hex_short(chunk)));
                 Ok(())
             }
             Err(e) => {
                 let e = js_err(e);
+                trace(format!("W! {:3} {} -> {e}", chunk.len(), hex_short(chunk)));
                 diag(|d| {
                     d.writes_failed += 1;
                     d.note = format!("Schreibfehler: {e}");
@@ -322,10 +367,15 @@ impl Link for WebLink {
         let deadline = now_ms() + timeout.as_secs_f64() * 1000.0;
         loop {
             if let Some(p) = self.queue.borrow_mut().pop_front() {
+                trace(format!("N  {:3} {}", p.len(), hex(&p)));
                 return Ok(Some(p));
             }
-            self.check()?;
+            if let Err(e) = self.check() {
+                trace("-- getrennt");
+                return Err(e);
+            }
             if now_ms() >= deadline {
+                trace(format!("-- keine Antwort nach {} ms", timeout.as_millis()));
                 return Ok(None);
             }
             sleep_ms(RECV_POLL_MS).await;

@@ -23,6 +23,14 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::Worker;
 
+/// The browser link's trace of writes and notifications (empty natively).
+pub fn link_trace() -> String {
+    #[cfg(target_arch = "wasm32")]
+    return katasymbol_web::trace_text();
+    #[cfg(not(target_arch = "wasm32"))]
+    String::new()
+}
+
 /// Whether the user picks the printer in a browser dialog (no address/scan list).
 pub const BROWSER_CHOOSER: bool = cfg!(target_arch = "wasm32");
 

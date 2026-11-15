@@ -555,12 +555,22 @@ impl App {
                         }
                     }
                 });
-                } else if !self.connected {
+                } else {
                     ui.menu_button(RichText::new(I_COG).size(16.0), |ui| {
                         ui.set_min_width(260.0);
-                        ui.label(RichText::new("Drucker nicht in der Liste?").small().weak());
-                        if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_BLUETOOTH}  Alle Geräte zeigen"))).clicked() {
-                            self.scan(true);
+                        if !self.connected {
+                            ui.label(RichText::new("Drucker nicht in der Liste?").small().weak());
+                            if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_BLUETOOTH}  Alle Geräte zeigen"))).clicked() {
+                                self.scan(true);
+                                ui.close();
+                            }
+                            ui.separator();
+                        }
+                        ui.label(RichText::new("Für die Fehlersuche").small().weak());
+                        if ui.button("Protokoll kopieren").clicked() {
+                            let text = format!("Katasymbol {BUILD}\n{}", backend::link_trace());
+                            ui.ctx().copy_text(text);
+                            self.message = Some(("Protokoll kopiert – jetzt z. B. in eine Nachricht einfügen.".into(), false));
                             ui.close();
                         }
                     });

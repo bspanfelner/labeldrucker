@@ -92,6 +92,7 @@ async fn handle(cmd: Cmd, shared: Shared, send: &dyn Fn(Ev)) {
         }
         Cmd::Print { page, density, copies, .. } => {
             let Some(mut p) = take(&shared, send) else { return };
+            katasymbol_web::trace(format!("== Druck: {} Spalten, Dichte {density}, {copies}×", page.width()));
             let copies = copies.max(1);
             let mut r = Ok(());
             for n in 1..=copies {
