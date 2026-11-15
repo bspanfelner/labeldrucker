@@ -3,26 +3,8 @@
 //! Only discovery goes through BlueZ; connecting uses the raw LE socket (see
 //! `katasymbol-linux` for why).
 
+use super::{Found, likely_printer};
 use std::process::Command;
-
-#[derive(Clone, Debug)]
-pub struct Found {
-    pub addr: String,
-    pub name: String,
-    /// Looks like a Supvan/Katasymbol printer.
-    pub likely: bool,
-}
-
-/// Supvan printers advertise a serial such as `T0105A2310082067`.
-fn likely_printer(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    let serial = name.is_ascii()
-        && name.len() >= 10
-        && name.starts_with('T')
-        && name[1..].chars().all(|c| c.is_ascii_alphanumeric())
-        && name[1..3].chars().all(|c| c.is_ascii_digit());
-    serial || ["katasymbol", "supvan", "e16", "t16"].iter().any(|k| n.contains(k))
-}
 
 fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -91,7 +73,5 @@ mod tests {
         assert_eq!(f[0].addr, "A4:93:40:3E:7B:0C");
         assert!(f[0].likely);
         assert!(!f[1].likely);
-        assert!(!likely_printer("Shelly2PMG4-D885ACF491DC"));
-        assert!(!likely_printer("S22 E5B8 LE"));
     }
 }

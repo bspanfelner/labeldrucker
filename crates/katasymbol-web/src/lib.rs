@@ -1,14 +1,11 @@
-//! Browser [`Link`] over Web Bluetooth, plus a small JS-facing API.
+//! Browser [`Link`] over Web Bluetooth.
 //!
-//! Build with `web/build.sh`; `web/index.html` is the UI. Web Bluetooth needs a
-//! secure context (`https://` or `http://localhost`) and Chrome/Edge (desktop or
-//! Android). Safari and Firefox do not implement it; on iOS use a Web Bluetooth
-//! browser such as Bluefy, or the native app.
+//! Web Bluetooth needs a secure context (`https://` or `http://localhost`) and
+//! Chrome/Edge (desktop or Android). Safari and Firefox do not implement it; on
+//! iOS use a Web Bluetooth browser such as Bluefy.
 #![cfg(target_arch = "wasm32")]
 
-use katasymbol_core::page::HEAD_DOTS;
-use katasymbol_core::printer::Progress;
-use katasymbol_core::{Error, Link, Page, Printer, Result};
+use katasymbol_core::{Error, Link, Result};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -147,124 +144,4 @@ impl Link for WebLink {
     async fn sleep(&mut self, d: Duration) {
         sleep_ms(d.as_millis().min(i32::MAX as u128) as i32).await;
     }
-}
-
-// ---------------------------------------------------------------- JS API
-
-fn to_js(e: Error) -> JsValue {
-    JsError::new(&e.to_string()).into()
-}
-
-/// A connected printer, for JavaScript.
-///
-/// Calls must not overlap; each returns a Promise and rejects while another
-/// call is still running.
-#[wasm_bindgen]
-pub struct E16 {
-    inner: Rc<RefCell<Option<Printer<WebLink>>>>,
-}
-
-#[wasm_bindgen]
-impl E16 {
-    /// Open the device chooser and connect. Call from a click handler.
-    pub async fn connect() -> std::result::Result<E16, JsValue> {
-        let link = WebLink::request().await.map_err(to_js)?;
-        Ok(E16 { inner: Rc::new(RefCell::new(Some(Printer::new(link)))) })
-    }
-
-    /// Run `f` on the printer while holding it exclusively.
-    fn run<F, Fut>(&self, f: F) -> js_sys::Promise
-    where
-        F: FnOnce(Printer<WebLink>) -> Fut + 'static,
-        Fut: std::future::Future<Output = (Printer<WebLink>, Result<JsValue>)>,
-    {
-        let inner = self.inner.clone();
-        wasm_bindgen_futures::future_to_promise(async move {
-            let printer = inner.borrow_mut().take().ok_or_else(|| JsError::new("printer is busy"))?;
-            let (printer, r) = f(printer).await;
-            *inner.borrow_mut() = Some(printer);
-            r.map_err(to_js)
-        })
-    }
-
-    /// `{ name, status, busy, printing, labels: { width, length, gap, remaining } | null }`
-    pub fn probe(&self) -> js_sys::Promise {
-        self.run(|mut p| async move {
-            let r = p.probe().await.map(|info| {
-                let o = js_sys::Object::new();
-                let set = |o: &js_sys::Object, k: &str, v: JsValue| {
-                    let _ = js_sys::Reflect::set(o, &k.into(), &v);
-                };
-                set(&o, "name", info.name.map_or(JsValue::NULL, Into::into));
-                set(&o, "status", info.status.error().unwrap_or("ready").into());
-                set(&o, "busy", info.status.busy.into());
-                set(&o, "printing", info.status.printing.into());
-                let labels = info.material.map_or(JsValue::NULL, |m| {
-                    let l = js_sys::Object::new();
-                    set(&l, "width", m.width_mm.into());
-                    set(&l, "length", m.length_mm.into());
-                    set(&l, "gap", m.gap_mm.into());
-                    set(&l, "remaining", m.remaining.map_or(JsValue::NULL, Into::into));
-                    l.into()
-                });
-                set(&o, "labels", labels);
-                o.into()
-            });
-            (p, r)
-        })
-    }
-
-    /// Print a grayscale bitmap `width` × 96 (row-major, 0 = black).
-    /// `on_progress(text)` is called as the job advances.
-    pub fn print_gray(
-        &self,
-        width: usize,
-        gray: Vec<u8>,
-        threshold: u8,
-        density: u8,
-        on_progress: js_sys::Function,
-    ) -> js_sys::Promise {
-        self.run(move |mut p| async move {
-            if gray.len() != width * HEAD_DOTS {
-                return (p, Err(Error::Encode(format!("expected {width}×{HEAD_DOTS} pixels"))));
-            }
-            let page = Page::from_gray(width, HEAD_DOTS, &gray, threshold);
-            let r = print(&mut p, &page, density, &on_progress).await;
-            (p, r)
-        })
-    }
-
-    /// Print the calibration pattern (frame, X, 5 mm ticks).
-    pub fn print_test(&self, length_mm: usize, density: u8, on_progress: js_sys::Function) -> js_sys::Promise {
-        self.run(move |mut p| async move {
-            let page = Page::test_pattern(length_mm);
-            let r = print(&mut p, &page, density, &on_progress).await;
-            (p, r)
-        })
-    }
-
-    pub fn disconnect(&self) {
-        if let Some(p) = self.inner.borrow_mut().take() {
-            p.into_link().disconnect();
-        }
-    }
-}
-
-async fn print(p: &mut Printer<WebLink>, page: &Page, density: u8, cb: &js_sys::Function) -> Result<JsValue> {
-    let report = |s: String| {
-        let _ = cb.call1(&JsValue::NULL, &s.into());
-    };
-    p.print(page, density, |pr| match pr {
-        Progress::Preparing => report("Vorbereiten …".into()),
-        Progress::Sending { buffer, of } => report(format!("Sende Teil {buffer}/{of} …")),
-        Progress::Finishing => report("Drucke …".into()),
-    })
-    .await?;
-    Ok(JsValue::UNDEFINED)
-}
-
-/// The head height in dots (bitmap height for `print_gray`).
-#[wasm_bindgen]
-pub fn head_dots() -> usize {
-    HEAD_DOTS
 }

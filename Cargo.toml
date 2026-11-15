@@ -11,4 +11,14 @@ rust-version = "1.85"
 [workspace.dependencies]
 katasymbol-core = { path = "crates/katasymbol-core" }
 katasymbol-linux = { path = "crates/katasymbol-linux" }
+katasymbol-btle = { path = "crates/katasymbol-btle" }
+katasymbol-web = { path = "crates/katasymbol-web" }
 thiserror = "2"
+
+# Small, fast downloads for the web build (`cargo build --profile web`).
+[profile.web]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

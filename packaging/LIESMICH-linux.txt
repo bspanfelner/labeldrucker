@@ -1,0 +1,14 @@
+Katasymbol für Linux (x86_64)
+=============================
+
+Starten ohne Installation:
+    ./katasymbol-app            (oder im Dateimanager doppelklicken)
+
+Ins Anwendungsmenü installieren (ohne Root):
+    ./install-linux.sh
+
+Voraussetzungen: ein Linux-Desktop (X11 oder Wayland) mit Bluetooth (BlueZ).
+Keine weiteren Pakete nötig. Läuft auf Distributionen ab etwa 2020
+(glibc 2.30 oder neuer: Ubuntu 20.04+, Debian 11+, Fedora 32+ …).
+
+Drucker: einschalten, Handy-Bluetooth aus, in der App „Suchen“ klicken.

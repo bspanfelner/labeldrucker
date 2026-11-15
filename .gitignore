@@ -1,3 +1,4 @@
 /target
 *.pklg
 /web/pkg
+/dist

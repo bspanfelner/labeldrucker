@@ -1,0 +1,16 @@
+Katasymbol für macOS (Apple Silicon und Intel, ab macOS 11)
+==========================================================
+
+Installieren: Katasymbol.app in den Ordner „Programme“ ziehen und starten.
+Beim ersten Start fragt macOS nach Bluetooth – bitte erlauben.
+
+Selbst gebaut (scripts/package-macos.sh) startet die App sofort.
+
+Aus dem Internet geladen (z. B. von GitHub) ist die App nicht von Apple
+beglaubigt. macOS blockiert sie dann beim ersten Öffnen. Einmalig freigeben:
+  Systemeinstellungen → Datenschutz & Sicherheit → „Dennoch öffnen“
+oder im Terminal:
+  xattr -dr com.apple.quarantine /Applications/Katasymbol.app
+
+Drucker: einschalten, iPhone-Bluetooth aus (oder Katasymbol-App dort
+schließen), in der App „Suchen“ klicken.

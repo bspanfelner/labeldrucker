@@ -11,9 +11,15 @@ pub struct Fonts {
 }
 
 impl Fonts {
+    /// System fonts (native) or the bundled fonts (web), plus the bundled
+    /// ones everywhere so saved designs look the same on every platform.
     pub fn system() -> Self {
         let mut db = fontdb::Database::new();
+        #[cfg(not(target_arch = "wasm32"))]
         db.load_system_fonts();
+        for data in BUNDLED {
+            db.load_font_data(data.to_vec());
+        }
         let mut families: Vec<String> =
             db.faces().filter_map(|f| f.families.first().map(|(n, _)| n.clone())).collect();
         families.sort_by_key(|f| f.to_lowercase());
@@ -54,10 +60,39 @@ impl Fonts {
     }
 }
 
-/// Load an image as grayscale, downscaled to a sensible size for a 96-dot head.
-/// Transparent areas count as white.
+/// Fonts shipped with the app (in the web build the only ones available).
+#[cfg(target_arch = "wasm32")]
+const BUNDLED: &[&[u8]] = &[
+    include_bytes!("../assets/fonts/DejaVuSans.ttf"),
+    include_bytes!("../assets/fonts/DejaVuSans-Bold.ttf"),
+    include_bytes!("../assets/fonts/LiberationSans-Regular.ttf"),
+    include_bytes!("../assets/fonts/LiberationSans-Bold.ttf"),
+    include_bytes!("../assets/fonts/LiberationSans-Italic.ttf"),
+    include_bytes!("../assets/fonts/LiberationSans-BoldItalic.ttf"),
+    include_bytes!("../assets/fonts/LiberationSerif-Regular.ttf"),
+    include_bytes!("../assets/fonts/LiberationSerif-Bold.ttf"),
+    include_bytes!("../assets/fonts/LiberationMono-Regular.ttf"),
+    include_bytes!("../assets/fonts/LiberationMono-Bold.ttf"),
+];
+#[cfg(not(target_arch = "wasm32"))]
+const BUNDLED: &[&[u8]] = &[];
+
+/// Load an image file as grayscale (see [`picture_from_bytes`]).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_picture(path: &Path) -> Result<Picture, String> {
-    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    picture_from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn load_picture(path: &Path) -> Result<Picture, String> {
+    Err(format!("{}: bitte erneut öffnen", path.display()))
+}
+
+/// Decode an image as grayscale, downscaled to a sensible size for a
+/// 96-dot head. Transparent areas count as white.
+pub fn picture_from_bytes(bytes: &[u8]) -> Result<Picture, String> {
+    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
     let max_h = 384;
     let img = if img.height() > max_h { img.resize(u32::MAX, max_h, image::imageops::FilterType::Triangle) } else { img };
     let rgba = img.to_rgba8();

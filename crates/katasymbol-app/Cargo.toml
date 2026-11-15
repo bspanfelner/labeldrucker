@@ -1,21 +1,40 @@
 [package]
 name = "katasymbol-app"
-description = "Desktop app to design and print labels on Katasymbol E16 printers"
+description = "App to design and print labels on Katasymbol E16 printers (desktop and web)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version = "1.92"
+
+[lib]
+path = "src/lib.rs"
 
 [[bin]]
 name = "katasymbol-app"
 path = "src/main.rs"
 
 [dependencies]
-eframe = { version = "0.32.3", features = ["persistence"] }
-fontdb = "0.24.0"
-image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
 katasymbol-core = { workspace = true, features = ["serde"] }
-katasymbol-linux.workspace = true
-pollster = "1.0.1"
-rfd = "0.18.0"
+eframe = { version = "0.32.3", features = ["persistence"] }
+fontdb = { version = "0.24.0", default-features = false, features = ["std"] }
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
+rfd = { version = "0.18.0", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fontdb = { version = "0.24.0", features = ["fs", "memmap", "fontconfig"] }
+pollster = "1.0.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+katasymbol-linux.workspace = true
+rfd = { version = "0.18.0", features = ["xdg-portal", "wayland"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+katasymbol-btle.workspace = true
+tokio = { version = "1", features = ["rt", "time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+katasymbol-web.workspace = true
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement"] }

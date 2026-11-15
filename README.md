@@ -3,18 +3,37 @@
 Rust software for the Katasymbol (Supvan) **E16** label printer over Bluetooth Low Energy.
 Targets: Linux, macOS, iOS and Web.
 
-## Status
+## Platforms
 
-| Part | State |
+| Platform | How to run | Build |
+|---|---|---|
+| **Linux** (x86_64, glibc ≥ 2.30) | unpack, run `katasymbol-app` (or `./install-linux.sh` for a menu entry) — no packages needed | `scripts/package-linux.sh` |
+| **macOS** 11+ (Apple Silicon + Intel) | `Katasymbol.app` (zip or dmg), allow Bluetooth on first start | `scripts/package-macos.sh` (on a Mac) |
+| **Web** (Chrome/Edge desktop + Android; iPhone/iPad via the Bluefy browser) | open the hosted page — nothing to install | `scripts/package-web.sh` |
+| **iOS native** | not yet — use the web app in Bluefy | — |
+| Windows | the btleplug link supports it; not packaged yet | — |
+
+All platforms run the same app (`katasymbol-app`, egui) over the same core; only
+the Bluetooth link differs: raw LE L2CAP socket on Linux (`katasymbol-linux`),
+CoreBluetooth via btleplug on macOS (`katasymbol-btle`), Web Bluetooth in the
+browser (`katasymbol-web`, started by `katasymbol-webapp`).
+
+`.github/workflows/build.yml` builds Linux, macOS and web on GitHub (manually or on a
+`v*` tag), attaches them to a release and publishes the web app on GitHub Pages.
+
+### Crates
+
+| Crate | Purpose |
 |------|-------|
-| `katasymbol-core` – protocol, page bitmap, LZMA, label layout (text, icons, frames), print flow | working, tested on an E16; builds for `wasm32-unknown-unknown` and `aarch64-apple-ios` |
-| `katasymbol-linux` – BLE link (raw LE L2CAP ATT socket) | working |
-| `katasymbol-cli` – `probe`, `test`, `image` | working |
-| macOS/iOS link (CoreBluetooth, e.g. via `btleplug`) | todo |
-| `katasymbol-web` – Web Bluetooth link + `web/` page (text, image, test pattern) | builds; hardware test pending |
-| `katasymbol-app` – desktop app (egui): text, images, pictograms incl. screws, 45 frame styles, length control, copies | working (printed on an E16) |
+| `katasymbol-core` | protocol, page bitmap, LZMA, label layout (text, pictograms, 45 frames), print flow — platform independent, builds for WASM and iOS |
+| `katasymbol-linux` | BLE link via a raw LE L2CAP ATT socket |
+| `katasymbol-btle` | BLE link via btleplug (macOS, Windows) |
+| `katasymbol-web` | BLE link via Web Bluetooth |
+| `katasymbol-app` | the app (desktop binary + library for the web build) |
+| `katasymbol-webapp` | WebAssembly entry point |
+| `katasymbol-cli` | `katasymbol probe | test | image` (Linux) |
 
-## Usage (Linux)
+## Usage (CLI, Linux)
 
 ```sh
 cargo build --release
@@ -28,40 +47,28 @@ No root and no pairing are needed. Turn off Bluetooth on phones that may hold th
 printer's connection; the E16 accepts one connection at a time and powers off
 after a few idle minutes.
 
-## Desktop app (Linux)
+## App
 
 ```sh
 cargo run --release -p katasymbol-app
 ```
 
-Click *Suchen* to find the printer (a short LE scan via `bluetoothctl`); the app
+Click *Suchen* (desktop) or *Verbinden* (web) to find the printer; the app
 connects on demand and reconnects after the printer has powered off. Labels are
-text (any system font, bold/italic, alignment, auto-fit) or an image (open or drag
-a PNG/JPEG), with up to two pictograms (~250 Font Awesome icons plus hand-drawn
-screws, threads, drives, nuts and fixings) and one of 45 frame styles in six
-categories (classic, decorative, work, birthday, Christmas, storage) with
-thickness, margin, padding and radius. A blank *Schnittrand* (default 2 mm) keeps
-the print away from the cut edges. Length: −/+, presets, the loaded label's length,
-*Automatisch* (fits the content), or drag the handle on the label's end. The
-design, printer address, density and copies are remembered.
+text (any system font — bundled DejaVu/Liberation on the web — bold/italic,
+alignment, auto-fit) or an image (open or drag a PNG/JPEG), with up to two
+pictograms (~250 Font Awesome icons plus hand-drawn screws, threads, drives, nuts
+and fixings) and one of 45 frame styles in six categories (classic, decorative,
+work, birthday, Christmas, storage). Length: −/+, presets, the loaded label's
+length, *Automatisch* (fits the content), or drag the handle on the label's end;
+a blank *Schnittrand* (default 2 mm) keeps the print away from the cut edges.
+Design, printer, density and copies are remembered. Narrow windows (phones) get
+a single-column layout.
 
 `cargo run -p katasymbol-core --example sheet -- DIR` writes contact sheets of all
-frames and pictograms. `KATASYMBOL_SCREENSHOT=out.png` renders a demo design, saves a screenshot and quits
-(use the X11 backend, e.g. `env -u WAYLAND_DISPLAY`, when the window is hidden).
-
-## Usage (Web)
-
-```sh
-rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.130   # must match Cargo.lock
-./web/build.sh
-python3 -m http.server -d web 8080                  # open http://localhost:8080 in Chrome/Edge
-```
-
-Web Bluetooth needs Chrome or Edge and a secure context (`localhost` or HTTPS). On Linux,
-enable `chrome://flags/#enable-experimental-web-platform-features` if `navigator.bluetooth`
-is missing; the Chromium snap also needs `sudo snap connect chromium:bluez`. Safari and
-Firefox have no Web Bluetooth (iOS: Bluefy browser, or the native app).
+frames and pictograms. `KATASYMBOL_SCREENSHOT=out.png` renders a demo design, saves
+a screenshot and quits (use the X11 backend, e.g. `env -u WAYLAND_DISPLAY`, when the
+window is hidden).
 
 ## Protocol summary (E16 / T16)
 
@@ -81,6 +88,8 @@ GATT services never show up; hence the raw L2CAP socket instead of `bluer`/`btle
 
 - Pictograms: Font Awesome 4.7 by Dave Gandy (SIL OFL 1.1), bundled in
   `crates/katasymbol-core/assets/`.
+- Web fonts: DejaVu Sans (Bitstream Vera license) and Liberation (SIL OFL 1.1), bundled
+  in `crates/katasymbol-app/assets/fonts/` (see `LICENSES.txt`).
 
 - Shared Supvan framing and command set: [heeen/supvan-cups](https://github.com/heeen/supvan-cups)
   (MIT, © 2026 Florian Hänel).

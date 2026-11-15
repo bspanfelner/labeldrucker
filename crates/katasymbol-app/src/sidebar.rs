@@ -32,8 +32,19 @@ fn mm_slider(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::Range
 }
 
 impl App {
+    /// The side panel (wide layout): content tabs over scrolling sections.
     pub fn sidebar(&mut self, ui: &mut egui::Ui) {
-        // Content type as a segmented control.
+        self.mode_tabs(ui);
+        ui.add_space(6.0);
+        let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        if std::env::var_os("KATASYMBOL_SCREENSHOT_SCROLL").is_some() {
+            scroll = scroll.vertical_scroll_offset(560.0);
+        }
+        scroll.show(ui, |ui| self.sections(ui));
+    }
+
+    /// Content type as a segmented control.
+    pub fn mode_tabs(&mut self, ui: &mut egui::Ui) {
         ui.columns(3, |cols| {
             for (col, (mode, text)) in cols.iter_mut().zip([
                 (Mode::Text, format!("{I_FONT}  Text")),
@@ -46,24 +57,21 @@ impl App {
                 }
             }
         });
-        ui.add_space(6.0);
-        let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
-        if std::env::var_os("KATASYMBOL_SCREENSHOT_SCROLL").is_some() {
-            scroll = scroll.vertical_scroll_offset(560.0);
-        }
-        scroll.show(ui, |ui| {
-            match self.design.mode {
-                Mode::Text => self.text_section(ui),
-                Mode::Image => self.image_section(ui),
-                Mode::Test => {
-                    ui.add_space(8.0);
-                    ui.label("Testmuster: Rahmen, X und Striche alle 5 mm.\nZum Prüfen von Ausrichtung und Dichte.");
-                    return;
-                }
+    }
+
+    /// All design sections for the current content type.
+    pub fn sections(&mut self, ui: &mut egui::Ui) {
+        match self.design.mode {
+            Mode::Text => self.text_section(ui),
+            Mode::Image => self.image_section(ui),
+            Mode::Test => {
+                ui.add_space(8.0);
+                ui.label("Testmuster: Rahmen, X und Striche alle 5 mm.\nZum Prüfen von Ausrichtung und Dichte.");
+                return;
             }
-            self.icon_section(ui);
-            self.frame_section(ui);
-        });
+        }
+        self.icon_section(ui);
+        self.frame_section(ui);
     }
 
     fn text_section(&mut self, ui: &mut egui::Ui) {
@@ -134,7 +142,7 @@ impl App {
         section(ui, I_PICTURE, "Bild", |ui| {
             ui.horizontal(|ui| {
                 if ui.add(egui::Button::new(format!("{I_FOLDER}  Bild öffnen …")).min_size(egui::vec2(0.0, 30.0))).clicked() {
-                    self.pick_image();
+                    self.pick_image(ui.ctx());
                 }
                 if self.design.image.is_some() && ui.button(format!("{I_TIMES}  Entfernen")).clicked() {
                     self.design.image = None;

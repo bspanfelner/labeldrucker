@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Katasymbol
+GenericName=Etikettendrucker
+Comment=Etiketten gestalten und auf dem Katasymbol E16 drucken
+Exec=katasymbol-app
+Icon=katasymbol
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=katasymbol
