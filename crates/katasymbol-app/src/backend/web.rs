@@ -49,7 +49,17 @@ async fn handle(cmd: Cmd, shared: Shared, send: &dyn Fn(Ev)) {
                     send(Ev::Device { addr: name.clone(), name });
                     send(Ev::Connected(true));
                     let mut p = Printer::new(link);
-                    let r = p.probe().await;
+                    let mut r = p.probe().await;
+                    // Not a single answer: try the other ATT write type.
+                    if r.is_err() && katasymbol_web::diagnostics().events == 0 {
+                        let other = !katasymbol_web::write_with_response();
+                        katasymbol_web::set_write_with_response(other);
+                        send(Ev::Progress("Keine Antwort – versuche andere Sendeart …".into()));
+                        r = p.probe().await;
+                        if r.is_err() {
+                            katasymbol_web::set_write_with_response(!other);
+                        }
+                    }
                     *shared.borrow_mut() = Some(p);
                     match r {
                         Ok(info) => send(Ev::Info(info)),
@@ -125,5 +135,11 @@ fn fail(e: katasymbol_core::Error, shared: &Shared, send: &dyn Fn(Ev)) {
 /// The error text, with how many answers the printer sent so far: tells a
 /// browser that drops notifications apart from a printer that is silent.
 fn diagnose(e: &katasymbol_core::Error) -> String {
-    format!("{e} (Antworten vom Drucker bisher: {})", katasymbol_web::notifications_seen())
+    let d = katasymbol_web::diagnostics();
+    let mode = if katasymbol_web::write_with_response() { "mit Antwort" } else { "ohne Antwort" };
+    let note = if d.note.is_empty() { String::new() } else { format!(", {}", d.note) };
+    format!(
+        "{e} (Diagnose: Ereignisse {}, gelesen {}, gesendet {}, Sendefehler {}, Schreiben {mode}{note})",
+        d.events, d.decoded, d.writes_ok, d.writes_failed
+    )
 }

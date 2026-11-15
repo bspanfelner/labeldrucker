@@ -44,12 +44,51 @@ async fn sleep_ms(ms: i32) {
 }
 
 thread_local! {
-    static NOTIFICATIONS: Cell<u32> = const { Cell::new(0) };
+    static DIAG: RefCell<Diag> = RefCell::new(Diag::default());
+    static WITH_RESPONSE: Cell<bool> = const { Cell::new(false) };
 }
 
-/// How many notifications the printer has sent so far (for diagnostics).
-pub fn notifications_seen() -> u32 {
-    NOTIFICATIONS.with(Cell::get)
+/// What happened on the link so far, to tell a browser that drops
+/// notifications apart from a printer that stays silent.
+#[derive(Default, Clone)]
+pub struct Diag {
+    /// Notification events delivered by the browser.
+    pub events: u32,
+    /// Of those, the ones whose value could be read.
+    pub decoded: u32,
+    pub writes_ok: u32,
+    pub writes_failed: u32,
+    /// The kind of the last value that could not be read, or of the last write error.
+    pub note: String,
+}
+
+pub fn diagnostics() -> Diag {
+    DIAG.with(|d| d.borrow().clone())
+}
+
+fn diag(f: impl FnOnce(&mut Diag)) {
+    DIAG.with(|d| f(&mut d.borrow_mut()));
+}
+
+/// Write with response (ATT Write Request) instead of the faster Write
+/// Command: a fallback for browsers whose write-without-response does not
+/// reach the printer.
+pub fn set_write_with_response(on: bool) {
+    WITH_RESPONSE.with(|w| w.set(on));
+}
+
+pub fn write_with_response() -> bool {
+    WITH_RESPONSE.with(Cell::get)
+}
+
+/// A short description of a JS value's kind, e.g. `DataView`.
+fn kind(v: &JsValue) -> String {
+    js_sys::Reflect::get(&js_sys::Object::new(), &"toString".into())
+        .ok()
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+        .and_then(|f| f.call0(v).ok())
+        .and_then(|s| s.as_string())
+        .map_or_else(|| format!("{:?}", v.js_typeof()), |s| s.replace("[object ", "").replace(']', ""))
 }
 
 /// The bytes of a notification value (a `DataView`, or any buffer).
@@ -176,17 +215,32 @@ impl WebLink {
                 return;
             }
             *last.borrow_mut() = ev_val.clone();
-            let from = |o: &JsValue| js_sys::Reflect::get(o, &"value".into()).ok().and_then(|v| bytes_of(&v));
-            let bytes = ev.target().and_then(|t| from(&t)).or_else(|| from(ev_val)).or_else(|| from(&source));
-            if let Some(b) = bytes {
-                NOTIFICATIONS.with(|n| n.set(n.get() + 1));
-                q.borrow_mut().push_back(b);
+            diag(|d| d.events += 1);
+            let target = ev.target().map(JsValue::from);
+            // Events bubble up to the device: skip other characteristics.
+            if let Some(t) = &target
+                && let Some(uuid) = js_sys::Reflect::get(t, &"uuid".into()).ok().and_then(|u| u.as_string())
+                && !uuid.eq_ignore_ascii_case(NOTIFY)
+            {
+                return;
+            }
+            let value = |o: &JsValue| js_sys::Reflect::get(o, &"value".into()).ok().filter(|v| !v.is_undefined() && !v.is_null());
+            let v = target.as_ref().and_then(value).or_else(|| value(ev_val)).or_else(|| value(&source));
+            match v.as_ref().and_then(bytes_of) {
+                Some(b) => {
+                    diag(|d| d.decoded += 1);
+                    q.borrow_mut().push_back(b);
+                }
+                None => diag(|d| d.note = format!("Wert: {}", v.as_ref().map_or("keiner".into(), kind))),
             }
         });
         notify
             .add_event_listener_with_callback("characteristicvaluechanged", on_value.as_ref().unchecked_ref())
             .map_err(js_err)?;
         let _ = js_sys::Reflect::set(&notify, &"oncharacteristicvaluechanged".into(), on_value.as_ref());
+        // Some browsers may only deliver to the device (where the event
+        // bubbles to anyway); duplicates are skipped above.
+        let _ = device.add_event_listener_with_callback("characteristicvaluechanged", on_value.as_ref().unchecked_ref());
         JsFuture::from(notify.start_notifications()).await.map_err(js_err)?;
 
         let connected = Rc::new(Cell::new(true));
@@ -218,10 +272,29 @@ impl Link for WebLink {
     async fn write(&mut self, chunk: &[u8]) -> Result<()> {
         self.check()?;
         let mut buf = chunk.to_vec();
-        JsFuture::from(self.write.write_value_without_response_with_u8_slice(&mut buf).map_err(js_err)?)
-            .await
-            .map_err(js_err)?;
-        Ok(())
+        let promise = if write_with_response() {
+            self.write.write_value_with_response_with_u8_slice(&mut buf)
+        } else {
+            self.write.write_value_without_response_with_u8_slice(&mut buf)
+        };
+        let r = match promise {
+            Ok(p) => JsFuture::from(p).await.map(drop),
+            Err(e) => Err(e),
+        };
+        match r {
+            Ok(()) => {
+                diag(|d| d.writes_ok += 1);
+                Ok(())
+            }
+            Err(e) => {
+                let e = js_err(e);
+                diag(|d| {
+                    d.writes_failed += 1;
+                    d.note = format!("Schreibfehler: {e}");
+                });
+                Err(e)
+            }
+        }
     }
 
     async fn recv(&mut self, timeout: Duration) -> Result<Option<Vec<u8>>> {
