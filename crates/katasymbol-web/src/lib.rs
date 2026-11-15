@@ -56,8 +56,8 @@ impl WebLink {
     /// Show the browser's device chooser and connect to the chosen printer.
     /// Must be called from a user gesture (e.g. a click handler).
     ///
-    /// Unless `all`, the chooser lists only devices that advertise the
-    /// Supvan service or carry a printer-like name (see [`NAME_PREFIXES`]).
+    /// Unless `all`, the chooser lists only devices with a printer-like
+    /// name (see [`NAME_PREFIXES`]).
     pub async fn request(all: bool) -> Result<Self> {
         let bt = web_sys::window()
             .map(|w| w.navigator().bluetooth())
@@ -67,9 +67,10 @@ impl WebLink {
         if all {
             opts.set_accept_all_devices(true);
         } else {
-            let service = web_sys::BluetoothLeScanFilterInit::new();
-            service.set_services(&[js_sys::JsString::from(SERVICE)]);
-            let mut filters = vec![service];
+            // Names only: the E16 does not advertise its service, and some
+            // browsers (Bluefy on iOS) pass a service filter on to the OS
+            // scan, which then finds nothing at all.
+            let mut filters = Vec::new();
             for prefix in NAME_PREFIXES {
                 let f = web_sys::BluetoothLeScanFilterInit::new();
                 f.set_name_prefix(prefix);
