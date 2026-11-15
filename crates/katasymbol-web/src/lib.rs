@@ -43,6 +43,39 @@ async fn sleep_ms(ms: i32) {
     let _ = JsFuture::from(p).await;
 }
 
+/// Chooser options: every device, or printer-like ones by name and (with
+/// `maker`) by the E16's manufacturer data (company 0x0000, value = its
+/// address). No service filter: the E16 does not advertise its service, and
+/// Bluefy on iOS passes service filters on to the OS scan, which then finds
+/// nothing at all.
+fn options(all: bool, maker: bool) -> RequestDeviceOptions {
+    let opts = RequestDeviceOptions::new();
+    if all {
+        opts.set_accept_all_devices(true);
+    } else {
+        let mut filters = Vec::new();
+        for prefix in NAME_PREFIXES {
+            let f = web_sys::BluetoothLeScanFilterInit::new();
+            f.set_name_prefix(prefix);
+            filters.push(f);
+        }
+        if maker {
+            let company = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(&company, &"companyIdentifier".into(), &0.into());
+            let f = web_sys::BluetoothLeScanFilterInit::new();
+            f.set_manufacturer_data(&js_sys::Array::of1(&company));
+            filters.push(f);
+        }
+        opts.set_filters(&filters);
+    }
+    opts.set_optional_services(&[js_sys::JsString::from(SERVICE)]);
+    opts
+}
+
+async fn choose(bt: &web_sys::Bluetooth, opts: &RequestDeviceOptions) -> std::result::Result<BluetoothDevice, JsValue> {
+    Ok(JsFuture::from(bt.request_device(opts)).await?.unchecked_into())
+}
+
 /// A Web Bluetooth GATT connection to one printer.
 pub struct WebLink {
     device: BluetoothDevice,
@@ -58,30 +91,24 @@ impl WebLink {
     /// Show the browser's device chooser and connect to the chosen printer.
     /// Must be called from a user gesture (e.g. a click handler).
     ///
-    /// Unless `all`, the chooser lists only devices with a printer-like
-    /// name (see [`NAME_PREFIXES`]).
+    /// Unless `all`, the chooser lists only printer-like devices (see [`options`]).
     pub async fn request(all: bool) -> Result<Self> {
         let bt = web_sys::window()
             .map(|w| w.navigator().bluetooth())
             .ok_or_else(|| Error::Link("no window".into()))?
             .ok_or_else(|| Error::Link("this browser has no Web Bluetooth".into()))?;
-        let opts = RequestDeviceOptions::new();
-        if all {
-            opts.set_accept_all_devices(true);
+        let device = if all {
+            choose(&bt, &options(true, false)).await.map_err(js_err)?
         } else {
-            // Names only: the E16 does not advertise its service, and some
-            // browsers (Bluefy on iOS) pass a service filter on to the OS
-            // scan, which then finds nothing at all.
-            let mut filters = Vec::new();
-            for prefix in NAME_PREFIXES {
-                let f = web_sys::BluetoothLeScanFilterInit::new();
-                f.set_name_prefix(prefix);
-                filters.push(f);
+            match choose(&bt, &options(false, true)).await {
+                // A browser that does not know manufacturer-data filters
+                // rejects the request: try again with names only.
+                Err(e) if e.dyn_ref::<js_sys::TypeError>().is_some() => {
+                    choose(&bt, &options(false, false)).await.map_err(js_err)?
+                }
+                r => r.map_err(js_err)?,
             }
-            opts.set_filters(&filters);
-        }
-        opts.set_optional_services(&[js_sys::JsString::from(SERVICE)]);
-        let device: BluetoothDevice = JsFuture::from(bt.request_device(&opts)).await.map_err(js_err)?.unchecked_into();
+        };
         Self::connect(device).await
     }
 
