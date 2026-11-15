@@ -20,9 +20,12 @@ pub mod protocol;
 pub mod status;
 pub mod draw;
 #[cfg(feature = "text")]
+pub mod frames;
+#[cfg(feature = "text")]
 pub mod icons;
 #[cfg(feature = "text")]
 pub mod label;
+pub mod pictos;
 #[cfg(feature = "text")]
 pub mod text;
 

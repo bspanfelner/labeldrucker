@@ -89,6 +89,8 @@ impl Design {
 }
 
 pub const MIN_MM: f32 = 10.0;
+/// Length of the frame-gallery thumbnails, dots.
+pub const THUMB_LEN: usize = 240;
 pub const MAX_MM: f32 = 200.0;
 
 /// What survives a restart.
@@ -121,6 +123,10 @@ pub struct App {
     thumbs_key: Option<(katasymbol_core::label::Frame, String)>,
     pub slot: Slot,
     pub icon_group: usize,
+    pub icon_groups: Vec<icons::Group>,
+    pub icon_filter: String,
+    icon_tex: std::collections::HashMap<char, TextureHandle>,
+    pub frame_cat: katasymbol_core::label::Category,
     pub font_filter: String,
     file_rx: Option<Receiver<Option<PathBuf>>>,
     /// Drag of the length handle: (length at start, px per mm at start, accumulated px).
@@ -152,10 +158,10 @@ impl App {
         let saved: Saved = if screenshot.is_some() {
             // A design that shows off frames and icons.
             let mut s = Saved::default();
-            s.design.label.text = "Gewürze\nOregano".into();
-            s.design.label.icon_left = Some('\u{f0f5}');
+            s.design.label.text = "Holzschrauben\n4 × 40".into();
+            s.design.label.icon_left = Some('\u{e010}');
             s.design.label.separator = true;
-            s.design.label.frame.style = katasymbol_core::label::FrameStyle::Double;
+            s.design.label.frame.style = katasymbol_core::label::FrameStyle::Nameplate;
             s.design.set_length_mm(50.0);
             s
         } else {
@@ -165,6 +171,7 @@ impl App {
         if !fonts.has(&design.family) {
             design.family = fonts.default_family();
         }
+        let frame_cat = design.label.frame.style.category();
         let addr = std::env::var("KATASYMBOL_ADDR").ok().unwrap_or(saved.addr);
         Self {
             worker,
@@ -180,6 +187,10 @@ impl App {
             thumbs_key: None,
             slot: Slot::Left,
             icon_group: 0,
+            icon_groups: icons::groups(),
+            icon_filter: String::new(),
+            icon_tex: Default::default(),
+            frame_cat,
             font_filter: String::new(),
             file_rx: None,
             drag: None,
@@ -255,7 +266,7 @@ impl App {
                     };
                     let font = &self.font.as_ref().unwrap().1;
                     if self.design.auto_length {
-                        let natural = self.design.label.natural_length(font, picture);
+                        let natural = self.design.label.natural_length(font, &self.icon_font, picture);
                         self.design.set_length_mm((natural as f32 / DOTS_PER_MM as f32).ceil());
                     }
                     Ok(self.design.label.render(font, &self.icon_font, picture))
@@ -294,7 +305,8 @@ impl App {
                 .iter()
                 .map(|&style| {
                     let label = Label {
-                        length: 208,
+                        length: THUMB_LEN,
+                        end_margin: 0.0,
                         text: "Abc".into(),
                         frame: katasymbol_core::label::Frame { style, ..base },
                         ..Label::default()
@@ -306,6 +318,21 @@ impl App {
             self.thumbs_key = Some(key);
         }
         &self.thumbs
+    }
+
+    /// A white-on-transparent texture of an icon, for tinting in the UI.
+    pub fn icon_texture(&mut self, ctx: &egui::Context, ch: char) -> TextureHandle {
+        if let Some(t) = self.icon_tex.get(&ch) {
+            return t.clone();
+        }
+        const N: usize = 64;
+        let mut c = katasymbol_core::draw::Canvas::new(N, N);
+        icons::draw(&mut c, &self.icon_font, ch, katasymbol_core::draw::Rect::new(2.0, 2.0, N as f32 - 2.0, N as f32 - 2.0));
+        let pixels = (0..N * N).map(|i| Color32::from_white_alpha((c.get(i % N, i / N) * 255.0) as u8)).collect();
+        let img = ColorImage { size: [N, N], source_size: egui::vec2(N as f32, N as f32), pixels };
+        let t = ctx.load_texture(format!("icon-{:x}", ch as u32), img, TextureOptions::LINEAR);
+        self.icon_tex.insert(ch, t.clone());
+        t
     }
 
     pub fn pick_image(&mut self) {

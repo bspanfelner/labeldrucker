@@ -131,6 +131,29 @@ impl Canvas {
 
     /// Ink every dot within `w/2` of the segment `a`–`b` (round caps).
     pub fn segment(&mut self, a: P, b: P, w: f32) {
+        self.line(a, b, w, 1.0);
+    }
+
+    /// A filled disc.
+    pub fn disc(&mut self, c: P, r: f32, v: f32) {
+        self.line(c, c, 2.0 * r, v);
+    }
+
+    /// Set every dot that lies inside `poly` and for which `f(x, y)` holds.
+    pub fn fill_with(&mut self, poly: &[P], f: impl Fn(usize, usize) -> bool) {
+        let mut mask = Canvas::new(self.width, self.height);
+        mask.fill(poly, 1.0);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if mask.get(x, y) >= 0.5 && f(x, y) {
+                    self.put(x, y, 1.0);
+                }
+            }
+        }
+    }
+
+    /// Set every dot within `w/2` of the segment `a`–`b` to `v`.
+    pub fn line(&mut self, a: P, b: P, w: f32, v: f32) {
         let r = w / 2.0;
         let bb = Rect::new(a.0.min(b.0) - r, a.1.min(b.1) - r, a.0.max(b.0) + r, a.1.max(b.1) + r);
         let (xs, ys) = self.span(bb);
@@ -142,7 +165,7 @@ impl Canvas {
                 let t = if len2 > 0.0 { (((px - a.0) * dx + (py - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
                 let (qx, qy) = (a.0 + t * dx - px, a.1 + t * dy - py);
                 if qx * qx + qy * qy <= r * r {
-                    self.put(x, y, 1.0);
+                    self.put(x, y, v);
                 }
             }
         }
@@ -323,4 +346,41 @@ pub fn wave_rect(b: Rect, amp: f32, period: f32) -> Vec<P> {
     let mut v: Vec<P> = (0..=n).map(|i| (x(i), y(i, b.y0, 1.0))).collect();
     v.extend((0..=n).rev().map(|i| (x(i), y(i, b.y1, -1.0))));
     v
+}
+
+/// An ellipse as a polygon.
+pub fn ellipse(c: P, rx: f32, ry: f32) -> Vec<P> {
+    let n = ((rx.max(ry) * 1.5) as usize).clamp(12, 96);
+    (0..n)
+        .map(|i| {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU;
+            (c.0 + rx * a.cos(), c.1 + ry * a.sin())
+        })
+        .collect()
+}
+
+/// A star with `n` points (first point straight up).
+pub fn star(c: P, outer: f32, inner: f32, n: usize) -> Vec<P> {
+    (0..2 * n)
+        .map(|i| {
+            let r = if i % 2 == 0 { outer } else { inner };
+            let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / n as f32;
+            (c.0 + r * a.cos(), c.1 + r * a.sin())
+        })
+        .collect()
+}
+
+/// A regular polygon with `n` corners, rotated by `rot` radians.
+pub fn regular(c: P, r: f32, n: usize, rot: f32) -> Vec<P> {
+    (0..n)
+        .map(|i| {
+            let a = rot + i as f32 * std::f32::consts::TAU / n as f32;
+            (c.0 + r * a.cos(), c.1 + r * a.sin())
+        })
+        .collect()
+}
+
+/// A rectangle polygon.
+pub fn rect_poly(r: Rect) -> Vec<P> {
+    vec![(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)]
 }

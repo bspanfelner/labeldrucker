@@ -4,7 +4,8 @@ use crate::style::*;
 use crate::{App, Mode, Slot};
 use eframe::egui::{self, Color32, RichText, Sense, Stroke};
 use katasymbol_core::icons;
-use katasymbol_core::label::{Frame, FrameStyle};
+use crate::THUMB_LEN;
+use katasymbol_core::label::{Category, Frame, FrameStyle};
 use katasymbol_core::text::Align;
 
 /// Toggle-style button.
@@ -166,26 +167,34 @@ impl App {
     }
 
     fn icon_section(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let tint = ui.visuals().text_color();
         section(ui, I_STAR, "Symbole", |ui| {
-            let l = &mut self.design.label;
             // The two slots; the selected one receives clicks in the grid.
             ui.horizontal(|ui| {
                 for (slot, name) in [(Slot::Left, "Links"), (Slot::Right, "Rechts")] {
-                    let icon = if slot == Slot::Left { &mut l.icon_left } else { &mut l.icon_right };
-                    let glyph = icon.map_or("–".to_string(), |c| c.to_string());
+                    let icon = if slot == Slot::Left { self.design.label.icon_left } else { self.design.label.icon_right };
                     ui.vertical(|ui| {
-                        let b = egui::Button::new(ic(&glyph).size(26.0)).selected(self.slot == slot).min_size(egui::vec2(64.0, 50.0));
-                        if ui.add(b).on_hover_text(format!("Symbol {name} – dann unten wählen")).clicked() {
+                        let b = match icon {
+                            Some(ch) => {
+                                let tex = self.icon_texture(&ctx, ch);
+                                egui::Button::image(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(34.0, 34.0)).tint(tint))
+                            }
+                            None => egui::Button::new(RichText::new("–").size(24.0)),
+                        };
+                        let tip = icon.and_then(icons::name).unwrap_or("leer");
+                        if ui.add(b.selected(self.slot == slot).min_size(egui::vec2(64.0, 50.0))).on_hover_text(format!("{name}: {tip} – unten auswählen")).clicked() {
                             self.slot = slot;
                         }
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(name).small());
                             if icon.is_some() && ui.small_button(I_TIMES).on_hover_text("Entfernen").clicked() {
-                                *icon = None;
+                                if slot == Slot::Left { self.design.label.icon_left = None } else { self.design.label.icon_right = None }
                             }
                         });
                     });
                 }
+                let l = &mut self.design.label;
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label("Größe");
@@ -195,31 +204,51 @@ impl App {
                 });
             });
             ui.add_space(4.0);
-            let current = if self.slot == Slot::Left { l.icon_left } else { l.icon_right };
-            // One group at a time, picked with tabs.
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                for (i, g) in icons::GROUPS.iter().enumerate() {
-                    if ui.add(egui::Button::new(RichText::new(g.name).size(12.5)).selected(self.icon_group == i).corner_radius(12)).clicked() {
-                        self.icon_group = i;
-                    }
-                }
-            });
-            ui.add_space(2.0);
-            if let Some(g) = icons::GROUPS.get(self.icon_group) {
+            ui.add(egui::TextEdit::singleline(&mut self.icon_filter).hint_text("Symbol suchen … (z. B. Schraube, Torx, Herz)").desired_width(f32::INFINITY));
+            let filter = self.icon_filter.trim().to_lowercase();
+            // Group tabs (hidden while searching).
+            if filter.is_empty() {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                    for ic in g.icons {
-                        let b = egui::Button::new(crate::style::ic(&ic.ch.to_string()).size(17.0))
-                            .selected(current == Some(ic.ch))
-                            .min_size(egui::vec2(34.0, 32.0));
-                        if ui.add(b).on_hover_text(ic.name).clicked() {
-                            let target = if self.slot == Slot::Left { &mut l.icon_left } else { &mut l.icon_right };
-                            *target = if *target == Some(ic.ch) { None } else { Some(ic.ch) };
+                    for (i, g) in self.icon_groups.iter().enumerate() {
+                        if ui.add(egui::Button::new(RichText::new(g.name).size(12.5)).selected(self.icon_group == i).corner_radius(12)).clicked() {
+                            self.icon_group = i;
                         }
                     }
                 });
+                ui.add_space(2.0);
             }
+            let shown: Vec<icons::Icon> = if filter.is_empty() {
+                self.icon_groups.get(self.icon_group).map(|g| g.icons.clone()).unwrap_or_default()
+            } else {
+                let mut v: Vec<icons::Icon> = Vec::new();
+                for g in &self.icon_groups {
+                    let group_hit = g.name.to_lowercase().contains(&filter);
+                    for i in &g.icons {
+                        if (group_hit || i.name.to_lowercase().contains(&filter)) && !v.iter().any(|x| x.ch == i.ch) {
+                            v.push(*i);
+                        }
+                    }
+                }
+                v
+            };
+            if shown.is_empty() {
+                ui.label(RichText::new("Kein Symbol gefunden.").weak());
+            }
+            let current = if self.slot == Slot::Left { self.design.label.icon_left } else { self.design.label.icon_right };
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                for ic in shown {
+                    let tex = self.icon_texture(&ctx, ic.ch);
+                    let b = egui::Button::image(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(28.0, 28.0)).tint(tint))
+                        .selected(current == Some(ic.ch))
+                        .min_size(egui::vec2(40.0, 38.0));
+                    if ui.add(b).on_hover_text(ic.name).clicked() {
+                        let target = if self.slot == Slot::Left { &mut self.design.label.icon_left } else { &mut self.design.label.icon_right };
+                        *target = if *target == Some(ic.ch) { None } else { Some(ic.ch) };
+                    }
+                }
+            });
         });
     }
 
@@ -227,11 +256,21 @@ impl App {
         let ctx = ui.ctx().clone();
         let thumbs: Vec<_> = self.frame_thumbs(&ctx).to_vec();
         section(ui, I_SQUARE, "Rahmen", |ui| {
+            // Category tabs.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                for cat in Category::ALL {
+                    if ui.add(egui::Button::new(RichText::new(cat.name()).size(12.5)).selected(self.frame_cat == cat).corner_radius(12)).clicked() {
+                        self.frame_cat = cat;
+                    }
+                }
+            });
+            ui.add_space(2.0);
             let f = &mut self.design.label.frame;
-            // Gallery of styles.
+            // Gallery of the category's styles.
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for (style, tex) in FrameStyle::ALL.iter().zip(&thumbs) {
+                for (style, tex) in FrameStyle::ALL.iter().zip(&thumbs).filter(|(s, _)| s.category() == self.frame_cat) {
                     let size = egui::vec2(100.0, 66.0);
                     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
                     let selected = f.style == *style;
@@ -245,7 +284,7 @@ impl App {
                     };
                     let p = ui.painter();
                     p.rect(rect, 6, v.faint_bg_color, stroke, egui::StrokeKind::Inside);
-                    let img = egui::Rect::from_min_size(rect.min + egui::vec2(6.0, 6.0), egui::vec2(88.0, 88.0 * 96.0 / 208.0));
+                    let img = egui::Rect::from_min_size(rect.min + egui::vec2(6.0, 6.0), egui::vec2(88.0, 88.0 * 96.0 / THUMB_LEN as f32));
                     p.rect_filled(img, 2, Color32::WHITE);
                     p.image(tex.id(), img, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
                     p.text(
@@ -262,15 +301,11 @@ impl App {
             });
             if f.style != FrameStyle::None {
                 ui.add_space(4.0);
+                ui.label(RichText::new(format!("Gewählt: {} ({})", f.style.name(), f.style.category().name())).small().weak());
                 mm_slider(ui, "Linienstärke", &mut f.thickness, 1.0..=10.0);
                 mm_slider(ui, "Abstand zum Rand", &mut f.margin, 0.0..=16.0);
                 mm_slider(ui, "Innenabstand", &mut f.padding, 0.0..=20.0);
-                if f.style.uses_radius() {
-                    let name = match f.style {
-                        FrameStyle::Chamfer => "Schräge",
-                        FrameStyle::Ticket => "Kerbe",
-                        _ => "Eckenradius",
-                    };
+                if let Some(name) = f.style.radius_name() {
                     mm_slider(ui, name, &mut f.radius, 0.0..=40.0);
                 }
                 if ui.button(format!("{I_UNDO}  Werte zurücksetzen")).clicked() {

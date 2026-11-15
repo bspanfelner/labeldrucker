@@ -12,7 +12,7 @@ Targets: Linux, macOS, iOS and Web.
 | `katasymbol-cli` – `probe`, `test`, `image` | working |
 | macOS/iOS link (CoreBluetooth, e.g. via `btleplug`) | todo |
 | `katasymbol-web` – Web Bluetooth link + `web/` page (text, image, test pattern) | builds; hardware test pending |
-| `katasymbol-app` – desktop app (egui): text, images, pictograms, 13 frame styles, length control, copies | working (printed on an E16) |
+| `katasymbol-app` – desktop app (egui): text, images, pictograms incl. screws, 45 frame styles, length control, copies | working (printed on an E16) |
 
 ## Usage (Linux)
 
@@ -37,12 +37,16 @@ cargo run --release -p katasymbol-app
 Click *Suchen* to find the printer (a short LE scan via `bluetoothctl`); the app
 connects on demand and reconnects after the printer has powered off. Labels are
 text (any system font, bold/italic, alignment, auto-fit) or an image (open or drag
-a PNG/JPEG), with up to two pictograms and one of 13 frame styles (thickness,
-margin, padding, radius). Length: −/+, presets, the loaded label's length,
+a PNG/JPEG), with up to two pictograms (~250 Font Awesome icons plus hand-drawn
+screws, threads, drives, nuts and fixings) and one of 45 frame styles in six
+categories (classic, decorative, work, birthday, Christmas, storage) with
+thickness, margin, padding and radius. A blank *Schnittrand* (default 2 mm) keeps
+the print away from the cut edges. Length: −/+, presets, the loaded label's length,
 *Automatisch* (fits the content), or drag the handle on the label's end. The
 design, printer address, density and copies are remembered.
 
-`KATASYMBOL_SCREENSHOT=out.png` renders a demo design, saves a screenshot and quits
+`cargo run -p katasymbol-core --example sheet -- DIR` writes contact sheets of all
+frames and pictograms. `KATASYMBOL_SCREENSHOT=out.png` renders a demo design, saves a screenshot and quits
 (use the X11 backend, e.g. `env -u WAYLAND_DISPLAY`, when the window is hidden).
 
 ## Usage (Web)

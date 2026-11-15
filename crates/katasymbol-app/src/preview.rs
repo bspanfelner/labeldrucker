@@ -63,6 +63,20 @@ impl App {
                 }
             }
         });
+        if !test {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("{I_CUT}  Schnittrand")).strong());
+                ui.add(
+                    egui::Slider::new(&mut self.design.label.end_margin, 0.0..=48.0)
+                        .step_by(2.0)
+                        .custom_formatter(|v, _| format!("{:.2} mm", v / 8.0).replace('.', ",")),
+                )
+                .on_hover_text("Freier Rand am Anfang und Ende des Etiketts, damit der Druck nicht zu nah an der Schnittkante liegt");
+                if ui.small_button(I_UNDO).on_hover_text("Standard: 2 mm").clicked() {
+                    self.design.label.end_margin = katasymbol_core::label::DEFAULT_END_MARGIN;
+                }
+            });
+        }
     }
 
     fn label_view(&mut self, ui: &mut egui::Ui) {
@@ -98,6 +112,15 @@ impl App {
             let guide = Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(47, 111, 235, 60));
             for y in [band.min.y, band.max.y] {
                 p.line_segment([pos2(label.min.x + 4.0, y), pos2(label.max.x - 4.0, y)], guide);
+            }
+        }
+
+        // The blank end margins at the cut edges.
+        if self.design.mode != Mode::Test && self.design.label.end_margin > 0.0 {
+            let m = self.design.label.end_margin / 8.0 * scale;
+            let hint = Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(47, 111, 235, 110));
+            for x in [label.min.x + m, label.max.x - m] {
+                p.add(egui::Shape::dashed_line(&[pos2(x, label.min.y + 3.0), pos2(x, label.max.y - 3.0)], hint, 3.0, 3.0));
             }
         }
 
