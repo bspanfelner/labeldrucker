@@ -13,7 +13,11 @@
   canvas#app { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; }
   #loading { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 16px; }
   #loading small { color: #999; display: block; margin-top: 8px; max-width: 34em; }
+  #loading { pointer-events: none; }
+  #loading.problem { pointer-events: auto; }
   #nobt { display: none; color: #ffb74d; }
+  #problem { display: none; color: #ff8a80; max-width: 36em; margin-top: 12px; }
+  #problem code { background: #333; padding: 2px 6px; border-radius: 4px; color: #eee; }
 </style>
 </head>
 <body>
@@ -23,12 +27,31 @@
     Katasymbol wird geladen …
     <small id="nobt">Dieser Browser kann kein Web Bluetooth. Zum Drucken bitte Chrome oder Edge
     verwenden (auf dem iPhone den Browser „Bluefy“). Gestalten geht trotzdem.</small>
+    <div id="problem"></div>
   </div>
 </div>
 <script type="module">
+  const problem = (html) => {
+    const p = document.getElementById("problem");
+    p.innerHTML = html;
+    p.style.display = "block";
+    document.getElementById("loading").classList.add("problem");
+  };
   if (!navigator.bluetooth) document.getElementById("nobt").style.display = "block";
-  import init from "./pkg/katasymbol_webapp.js";
-  init();
+  if (location.protocol === "file:") {
+    // Browsers refuse to load WebAssembly modules from the local disk.
+    problem(`Die Seite wurde direkt als Datei geöffnet – so lädt der Browser die App nicht.<br><br>
+      Bitte über einen Webserver öffnen, z. B. im Ordner <code>web</code>:<br>
+      <code>python3 -m http.server 8090</code><br>dann <code>http://localhost:8090</code> aufrufen.`);
+  } else {
+    try {
+      const { default: init } = await import("./pkg/katasymbol_webapp.js");
+      await init();
+    } catch (e) {
+      console.error(e);
+      problem(`Die App konnte nicht starten:<br><code>${String(e?.message ?? e)}</code>`);
+    }
+  }
 </script>
 </body>
 </html>

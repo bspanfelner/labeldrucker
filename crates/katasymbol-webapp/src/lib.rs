@@ -7,11 +7,20 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn start() {
     wasm_bindgen_futures::spawn_local(async {
-        if let Err(e) = katasymbol_app::run_web("app").await {
-            web_sys_log(&format!("Katasymbol konnte nicht starten: {e:?}"));
+        match katasymbol_app::run_web("app").await {
+            // Running: remove the loading notice.
+            Ok(()) => {
+                let _ = js_sys_eval("document.getElementById('loading')?.remove()");
+            }
+            // E.g. no WebGL: show why on the page.
+            Err(e) => {
+                let msg = format!("{e:?}").replace('\\', "").replace('`', "'");
+                web_sys_log(&format!("Katasymbol konnte nicht starten: {msg}"));
+                let _ = js_sys_eval(&format!(
+                    "(()=>{{const p=document.getElementById('problem');p.textContent=`Die App konnte nicht starten: {msg}`;p.style.display='block';}})()"
+                ));
+            }
         }
-        // Hide the loading notice once the app runs (or failed).
-        let _ = js_sys_eval("document.getElementById('loading')?.remove()");
     });
 }
 
