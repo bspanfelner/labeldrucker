@@ -23,11 +23,10 @@ const WRITE: &str = "0000ffe9-0000-1000-8000-00805f9b34fb";
 pub const NAME_PREFIXES: &[&str] = &["T0", "T1", "E1", "Katasymbol", "KATASYMBOL", "Supvan", "SUPVAN"];
 /// The error when the chosen device lacks the Supvan service.
 pub const NOT_A_PRINTER: &str = "Das gewählte Gerät ist kein Katasymbol-Drucker – bitte einen anderen Eintrag wählen";
-/// Default write size in the browser: 20 bytes fit the smallest ATT MTU,
-/// so no browser has to split or truncate a write (with 128-byte writes
-/// Bluefy on iOS got commands through but printed blank labels). Override
-/// with `?chunk=N` in the page address.
-pub const WEB_CHUNK: usize = 20;
+/// Default write size in the browser: 128 bytes, like the vendor app. (The
+/// printer drops the connection when a data frame arrives in 20-byte
+/// writes.) Override with `?chunk=N` in the page address.
+pub const WEB_CHUNK: usize = 128;
 
 /// The write size: `?chunk=N` in the page address, else [`WEB_CHUNK`].
 pub fn chunk_size() -> usize {
