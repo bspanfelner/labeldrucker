@@ -21,6 +21,13 @@ use std::sync::mpsc::Receiver;
 use style::*;
 use backend::{BROWSER_CHOOSER, Cmd, Ev, Found, Worker};
 
+/// Shown in the top bar: the build (commit and time, set by the build
+/// scripts in `KATASYMBOL_BUILD`), else the crate version.
+const BUILD: &str = match option_env!("KATASYMBOL_BUILD") {
+    Some(b) => b,
+    None => concat!("v", env!("CARGO_PKG_VERSION")),
+};
+
 /// An image the user opened, with its bytes when it cannot be re-read from
 /// disk (web).
 type ImageFile = (PathBuf, Option<Vec<u8>>);
@@ -525,6 +532,7 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{I_TAG}  Katasymbol")).heading().strong());
+            ui.label(RichText::new(BUILD).small().weak()).on_hover_text("Version dieses Programms");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Address and found devices, tucked away (not in the browser,
                 // where the browser's chooser picks the device).

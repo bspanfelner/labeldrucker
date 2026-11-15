@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <meta name="theme-color" content="#1b1b1b">
+<meta http-equiv="Cache-Control" content="no-cache">
 <title>Katasymbol</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="manifest" href="manifest.json">
@@ -25,6 +26,7 @@
 <div id="loading">
   <div>
     Katasymbol wird geladen …
+    <small id="build"></small>
     <small id="nobt">Dieser Browser kann kein Web Bluetooth. Zum Drucken bitte Chrome oder Edge
     verwenden (auf dem iPhone den Browser „Bluefy“). Gestalten geht trotzdem.</small>
     <div id="problem"></div>
@@ -45,8 +47,17 @@
       <code>python3 -m http.server 8090</code><br>dann <code>http://localhost:8090</code> aufrufen.`);
   } else {
     try {
-      const { default: init } = await import("./pkg/katasymbol_webapp.js");
-      await init();
+      // Ask the server for the current build every time, and load the app
+      // under a URL that names it: a cached older app is never reused.
+      let build = String(Date.now());
+      try {
+        const r = await fetch("./pkg/build.txt", { cache: "no-store" });
+        if (r.ok) build = (await r.text()).trim();
+      } catch {}
+      document.getElementById("build").textContent = "Version " + build;
+      const v = encodeURIComponent(build);
+      const { default: init } = await import(`./pkg/katasymbol_webapp.js?v=${v}`);
+      await init({ module_or_path: `./pkg/katasymbol_webapp_bg.wasm?v=${v}` });
     } catch (e) {
       console.error(e);
       problem(`Die App konnte nicht starten:<br><code>${String(e?.message ?? e)}</code>`);
