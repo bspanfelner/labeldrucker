@@ -139,7 +139,7 @@ fn diagnose(e: &katasymbol_core::Error) -> String {
     let mode = if katasymbol_web::write_with_response() { "mit Antwort" } else { "ohne Antwort" };
     let note = if d.note.is_empty() { String::new() } else { format!(", {}", d.note) };
     format!(
-        "{e} (Diagnose: Ereignisse {}, gelesen {}, gesendet {}, Sendefehler {}, Schreiben {mode}{note})",
-        d.events, d.decoded, d.writes_ok, d.writes_failed
+        "{e} (Diagnose: Ereignisse {}, gelesen {}, gesendet {}, Sendefehler {}, Schreiben {mode}, Paket {} B{note})",
+        d.events, d.decoded, d.writes_ok, d.writes_failed, katasymbol_web::chunk_size()
     )
 }

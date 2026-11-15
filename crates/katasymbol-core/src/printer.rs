@@ -23,6 +23,10 @@ pub trait Link {
     /// Next notification, or `None` once `timeout` passes without one.
     async fn recv(&mut self, timeout: Duration) -> Result<Option<Vec<u8>>>;
     async fn sleep(&mut self, d: Duration);
+    /// Largest write this link sends at once (frames are split into chunks).
+    fn chunk_size(&self) -> usize {
+        BLE_CHUNK
+    }
 }
 
 /// What `probe` reports.
@@ -55,7 +59,8 @@ impl<L: Link> Printer<L> {
     }
 
     async fn write_frame(&mut self, frame: &[u8]) -> Result<()> {
-        for (i, chunk) in frame.chunks(BLE_CHUNK).enumerate() {
+        let size = self.link.chunk_size().max(1);
+        for (i, chunk) in frame.chunks(size).enumerate() {
             if i > 0 {
                 self.link.sleep(CHUNK_DELAY).await;
             }
