@@ -1,10 +1,12 @@
-# Builds every platform. Runs on tags (v*) and on demand (Actions → Build → Run workflow).
+# Builds every platform on tags (v*) and on demand (Actions → Build → Run workflow);
+# every push to main rebuilds just the web app and GitHub Pages.
 # Tags also publish a GitHub release; the web app goes to GitHub Pages
 # (Settings → Pages → Source: GitHub Actions).
 name: Build
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -15,6 +17,7 @@ permissions:
 
 jobs:
   linux:
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +28,7 @@ jobs:
         with: { name: linux, path: dist/*.tar.gz }
 
   macos:
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
