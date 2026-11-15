@@ -1,6 +1,6 @@
 //! Render every frame style and every pictogram into PNG contact sheets:
 //! `cargo run -p katasymbol-core --example sheet -- OUT_DIR [font.ttf]`
-//! writes `frames.png` and `icons.png`.
+//! writes `frames.png`, `icons.png`, `pictos.png` and `screws.png`.
 use katasymbol_core::draw::{Canvas, Rect};
 use katasymbol_core::icons;
 use katasymbol_core::label::{Category, Frame, FrameStyle, Label};
@@ -74,5 +74,13 @@ fn main() {
         }
     }
     save(&big, 1, &format!("{dir}/pictos.png"));
+
+    // Screw labels at print resolution, as they come out of the printer.
+    let mut screws = Vec::new();
+    for p in katasymbol_core::pictos::HEADS.iter().take(6) {
+        let label = Label { length: 320, text: "M4×20".into(), icon_left: Some(p.ch), ..Label::default() };
+        screws.push(label.canvas(&font, &icon_font, None));
+    }
+    save(&screws, 2, &format!("{dir}/screws.png"));
     save(&strips, 2, &format!("{dir}/icons.png"));
 }

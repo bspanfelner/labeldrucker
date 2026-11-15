@@ -44,12 +44,23 @@ impl U {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Head {
+    /// ISO 10642: 90° countersunk, hex socket.
     Countersunk,
+    /// Countersunk with a cross recess.
+    CountersunkCross,
+    /// Countersunk with a lens-shaped top.
     RaisedCountersunk,
-    Pan,
+    /// ISO 7380: low lens dome, hex socket.
+    Button,
+    /// DIN 7985: domed pan head, cross recess.
+    PanCross,
     Round,
     Truss,
+    /// ISO 4762: tall cylinder, hex socket.
+    SocketCap,
+    /// Slotted cheese head.
     Cheese,
+    /// ISO 4017: hex head.
     Hex,
     Carriage,
     Wing,
@@ -63,75 +74,153 @@ enum Tip {
     Drill,
 }
 
-/// Draw a head; returns where the shank starts (u).
+use std::f32::consts::{FRAC_PI_2, PI};
+
+/// Points on an elliptical arc from angle `a0` to `a1` (radians; 0 = +u,
+/// π/2 = +v, i.e. down).
+fn arc(cu: f32, cv: f32, ru: f32, rv: f32, a0: f32, a1: f32) -> Vec<(f32, f32)> {
+    (0..=24).map(|i| a0 + (a1 - a0) * i as f32 / 24.0).map(|a| (cu + ru * a.cos(), cv + rv * a.sin())).collect()
+}
+
+/// Shank radius of the screws (the head sizes are in proportion).
+const SHANK: f32 = 0.14;
+
+/// A hex socket seen from the side: a white pocket in the head face at `u0`
+/// with a drill-point bottom, `depth` deep.
+fn socket(c: &mut Canvas, u: &U, u0: f32, depth: f32, half: f32) {
+    let u1 = u0 + depth;
+    u.fill(c, &[(u0 - 0.02, 0.5 - half), (u1, 0.5 - half), (u1 + half * 0.45, 0.5), (u1, 0.5 + half), (u0 - 0.02, 0.5 + half)], 0.0);
+}
+
+/// A cross recess seen from the side: a V notch.
+fn cross(c: &mut Canvas, u: &U, u0: f32, depth: f32, half: f32) {
+    u.fill(c, &[(u0 - 0.02, 0.5 - half), (u0 + depth, 0.5), (u0 - 0.02, 0.5 + half)], 0.0);
+}
+
+/// A slot seen from the side: a narrow rectangular cut.
+fn slot(c: &mut Canvas, u: &U, u0: f32, depth: f32) {
+    u.fill_rect(c, u0 - 0.02, 0.465, u0 + depth, 0.535, 0.0);
+}
+
+/// Draw a head (side view, the free face on the left); returns where the
+/// shank starts (u).
 fn head(c: &mut Canvas, u: &U, h: Head) -> f32 {
+    let (top, bot) = (0.5 - SHANK, 0.5 + SHANK);
     match h {
-        Head::Countersunk | Head::RaisedCountersunk => {
-            u.fill(c, &[(0.07, 0.2), (0.1, 0.2), (0.27, 0.41), (0.27, 0.59), (0.1, 0.8), (0.07, 0.8)], 1.0);
-            if h == Head::RaisedCountersunk {
-                u.ellipse(c, 0.08, 0.5, 0.05, 0.3, 1.0);
+        Head::Countersunk | Head::CountersunkCross | Head::RaisedCountersunk => {
+            // A short rim, then the 90° cone down to the shank.
+            let (u0, rim, r) = (0.05, 0.035, 0.42);
+            let cone = u0 + rim + (r - SHANK);
+            u.fill(c, &[(u0, 0.5 - r), (u0 + rim, 0.5 - r), (cone, top), (cone, bot), (u0 + rim, 0.5 + r), (u0, 0.5 + r)], 1.0);
+            let face = if h == Head::RaisedCountersunk {
+                // A shallow lens on the free face.
+                let bulge = 0.07;
+                let rr = (r * r + bulge * bulge) / (2.0 * bulge);
+                let a = (r / rr).asin();
+                u.fill(c, &arc(u0 - bulge + rr, 0.5, rr, rr, PI - a, PI + a), 1.0);
+                u0 - bulge
+            } else {
+                u0
+            };
+            if h == Head::CountersunkCross {
+                cross(c, u, face, 0.17, 0.17);
+            } else {
+                socket(c, u, face, 0.13, 0.1);
             }
-            0.27
+            cone
         }
-        Head::Pan => {
-            c.fill(&rounded_rect(u.rect(0.05, 0.26, 0.22, 0.74), u.s(0.07)), 1.0);
-            u.fill_rect(c, 0.15, 0.26, 0.22, 0.74, 1.0);
-            0.22
+        Head::Button => {
+            // ISO 7380: a thin rim and a flat lens (circle segment).
+            let (rim0, rim1, r, bulge) = (0.22, 0.26, 0.42, 0.17);
+            u.fill_rect(c, rim0, 0.5 - r, rim1, 0.5 + r, 1.0);
+            let rr = (r * r + bulge * bulge) / (2.0 * bulge);
+            let a = (r / rr).asin();
+            u.fill(c, &arc(rim0 - bulge + rr, 0.5, rr, rr, PI - a, PI + a), 1.0);
+            socket(c, u, rim0 - bulge, 0.12, 0.1);
+            rim1
+        }
+        Head::PanCross => {
+            // DIN 7985: steep sides, domed top.
+            let (u0, u1, r) = (0.05, 0.26, 0.36);
+            let mut pts = vec![(u1, 0.5 - r), (u1, 0.5 + r)];
+            pts.extend(arc(u0 + 0.1, 0.5, 0.1, r, FRAC_PI_2, 3.0 * FRAC_PI_2));
+            u.fill(c, &pts, 1.0);
+            cross(c, u, u0, 0.15, 0.15);
+            u1
         }
         Head::Round => {
-            let mut pts = vec![(0.22, 0.24)];
-            for i in 0..=24 {
-                let a = std::f32::consts::FRAC_PI_2 + i as f32 / 24.0 * std::f32::consts::PI;
-                pts.push((0.22 + 0.16 * a.cos(), 0.5 - 0.26 * a.sin()));
-            }
+            let r = 0.29;
+            let mut pts = vec![(0.25, 0.5 - r), (0.25, 0.5 + r)];
+            pts.extend(arc(0.25, 0.5, 0.2, r, FRAC_PI_2, 3.0 * FRAC_PI_2));
             u.fill(c, &pts, 1.0);
-            0.22
-        }
-        Head::Truss => {
-            let mut pts = Vec::new();
-            for i in 0..=24 {
-                let a = std::f32::consts::FRAC_PI_2 + i as f32 / 24.0 * std::f32::consts::PI;
-                pts.push((0.19 + 0.12 * a.cos(), 0.5 - 0.34 * a.sin()));
-            }
-            u.fill(c, &pts, 1.0);
-            0.19
-        }
-        Head::Cheese => {
-            c.fill(&rounded_rect(u.rect(0.05, 0.28, 0.23, 0.72), u.s(0.025)), 1.0);
-            0.23
-        }
-        Head::Hex => {
-            u.fill_rect(c, 0.06, 0.19, 0.21, 0.81, 1.0);
-            u.fill_rect(c, 0.21, 0.3, 0.235, 0.7, 1.0); // washer face
-            for v in [0.38, 0.62] {
-                u.line(c, (0.07, v), (0.2, v), 0.025, 0.0);
-            }
-            0.235
-        }
-        Head::Carriage => {
-            let mut pts = Vec::new();
-            for i in 0..=24 {
-                let a = std::f32::consts::FRAC_PI_2 + i as f32 / 24.0 * std::f32::consts::PI;
-                pts.push((0.18 + 0.13 * a.cos(), 0.5 - 0.3 * a.sin()));
-            }
-            u.fill(c, &pts, 1.0);
-            u.fill_rect(c, 0.17, 0.38, 0.28, 0.62, 1.0); // square neck
-            0.28
-        }
-        Head::Wing => {
-            u.ellipse(c, 0.13, 0.25, 0.075, 0.19, 1.0);
-            u.ellipse(c, 0.13, 0.75, 0.075, 0.19, 1.0);
-            u.fill_rect(c, 0.09, 0.36, 0.25, 0.64, 1.0);
+            slot(c, u, 0.05, 0.08);
             0.25
         }
-        Head::Knurled => {
-            u.fill_rect(c, 0.05, 0.22, 0.22, 0.78, 1.0);
-            for k in 0..5 {
-                let v = 0.28 + k as f32 * 0.11;
-                u.line(c, (0.065, v), (0.205, v + 0.05), 0.02, 0.0);
+        Head::Truss => {
+            let r = 0.38;
+            let mut pts = vec![(0.2, 0.5 - r), (0.2, 0.5 + r)];
+            pts.extend(arc(0.2, 0.5, 0.13, r, FRAC_PI_2, 3.0 * FRAC_PI_2));
+            u.fill(c, &pts, 1.0);
+            cross(c, u, 0.07, 0.09, 0.1);
+            0.2
+        }
+        Head::SocketCap => {
+            // ISO 4762: tall cylinder, chamfered top edge, deep socket.
+            let (u0, u1, r, ch) = (0.04, 0.32, 0.32, 0.04);
+            u.fill(c, &[(u0, 0.5 - r + ch), (u0 + ch, 0.5 - r), (u1, 0.5 - r), (u1, 0.5 + r), (u0 + ch, 0.5 + r), (u0, 0.5 + r - ch)], 1.0);
+            socket(c, u, u0, 0.17, 0.12);
+            u1
+        }
+        Head::Cheese => {
+            let (u0, u1, r) = (0.05, 0.25, 0.25);
+            c.fill(&rounded_rect(u.rect(u0, 0.5 - r, u1, 0.5 + r), u.s(0.03)), 1.0);
+            u.fill_rect(c, u1 - 0.04, 0.5 - r, u1, 0.5 + r, 1.0);
+            slot(c, u, u0, 0.08);
+            u1
+        }
+        Head::Hex => {
+            // ISO 4017 across flats: three faces (the middle one twice as
+            // wide), each with the chamfer arc on the free face, and a
+            // washer face towards the shank.
+            let (u0, u1, r) = (0.05, 0.26, 0.42);
+            let edges = [0.5 - r, 0.5 - r / 2.0, 0.5 + r / 2.0, 0.5 + r];
+            let mut pts = vec![(u1, edges[0])];
+            for w in edges.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                let bulge = (b - a) * 0.3;
+                pts.extend(arc(u0 + bulge, (a + b) / 2.0, bulge, (b - a) / 2.0, 3.0 * FRAC_PI_2, FRAC_PI_2));
             }
-            u.fill_rect(c, 0.22, 0.38, 0.26, 0.62, 1.0);
-            0.26
+            pts.push((u1, edges[3]));
+            u.fill(c, &pts, 1.0);
+            for &e in &edges[1..3] {
+                u.line(c, (u0, e), (u1 - 0.02, e), 0.022, 0.0);
+            }
+            u.fill_rect(c, u1, 0.5 - r * 0.7, u1 + 0.03, 0.5 + r * 0.7, 1.0);
+            u1 + 0.03
+        }
+        Head::Carriage => {
+            let r = 0.32;
+            let mut pts = vec![(0.2, 0.5 - r), (0.2, 0.5 + r)];
+            pts.extend(arc(0.2, 0.5, 0.15, r, FRAC_PI_2, 3.0 * FRAC_PI_2));
+            u.fill(c, &pts, 1.0);
+            u.fill_rect(c, 0.19, 0.5 - SHANK * 1.15, 0.31, 0.5 + SHANK * 1.15, 1.0); // square neck
+            0.31
+        }
+        Head::Wing => {
+            u.ellipse(c, 0.13, 0.25, 0.08, 0.2, 1.0);
+            u.ellipse(c, 0.13, 0.75, 0.08, 0.2, 1.0);
+            u.fill_rect(c, 0.08, 0.34, 0.27, 0.66, 1.0);
+            0.27
+        }
+        Head::Knurled => {
+            let r = 0.3;
+            u.fill_rect(c, 0.05, 0.5 - r, 0.23, 0.5 + r, 1.0);
+            for k in 0..5 {
+                let v = 0.5 - r + 0.07 + k as f32 * 0.115;
+                u.line(c, (0.065, v), (0.215, v + 0.05), 0.022, 0.0);
+            }
+            u.fill_rect(c, 0.23, 0.5 - SHANK * 1.4, 0.28, 0.5 + SHANK * 1.4, 1.0);
+            0.28
         }
     }
 }
@@ -176,15 +265,16 @@ fn thread(c: &mut Canvas, u: &U, u0: f32, u1: f32, ri: f32, ro: f32, pitch: f32,
 
 fn screw(c: &mut Canvas, u: &U, h: Head, thread_kind: Thread) {
     let start = head(c, u, h);
+    let (ri, ro) = (SHANK - 0.035, SHANK);
     match thread_kind {
-        Thread::Machine => thread(c, u, start, 0.93, 0.085, 0.115, 0.055, Tip::Blunt),
+        Thread::Machine => thread(c, u, start - 0.005, 0.95, ri, ro, 0.085, Tip::Blunt),
         Thread::Wood => {
-            u.fill_rect(c, start - 0.01, 0.42, 0.5, 0.58, 1.0);
-            thread(c, u, 0.5, 0.96, 0.06, 0.13, 0.09, Tip::Point);
+            u.fill_rect(c, start - 0.01, 0.5 - ri, 0.52, 0.5 + ri, 1.0);
+            thread(c, u, 0.52, 0.97, ri - 0.02, ro + 0.015, 0.1, Tip::Point);
         }
-        Thread::Chipboard => thread(c, u, start, 0.96, 0.06, 0.14, 0.1, Tip::Point),
-        Thread::Sheet => thread(c, u, start, 0.94, 0.065, 0.12, 0.07, Tip::Point),
-        Thread::Drill => thread(c, u, start, 0.96, 0.07, 0.12, 0.07, Tip::Drill),
+        Thread::Chipboard => thread(c, u, start - 0.005, 0.97, ri - 0.02, ro + 0.015, 0.1, Tip::Point),
+        Thread::Sheet => thread(c, u, start - 0.005, 0.95, ri - 0.01, ro, 0.085, Tip::Point),
+        Thread::Drill => thread(c, u, start - 0.005, 0.97, ri, ro, 0.085, Tip::Drill),
     }
 }
 
@@ -216,30 +306,34 @@ macro_rules! picto {
     };
 }
 
-/// Screw heads (all with machine thread).
+/// Screw heads (all with machine thread). Code points stay stable: saved
+/// designs refer to them.
 pub const HEADS: &[Picto] = &[
-    picto!(0, "Senkkopf", |c, u| screw(c, u, Head::Countersunk, Thread::Machine)),
+    picto!(0, "Senkkopf Innensechskant", |c, u| screw(c, u, Head::Countersunk, Thread::Machine)),
+    picto!(11, "Senkkopf Kreuz", |c, u| screw(c, u, Head::CountersunkCross, Thread::Machine)),
+    picto!(5, "Zylinderkopf Innensechskant", |c, u| screw(c, u, Head::SocketCap, Thread::Machine)),
+    picto!(2, "Linsenkopf Innensechskant", |c, u| screw(c, u, Head::Button, Thread::Machine)),
+    picto!(12, "Linsenkopf Kreuz", |c, u| screw(c, u, Head::PanCross, Thread::Machine)),
+    picto!(6, "Sechskantkopf", |c, u| screw(c, u, Head::Hex, Thread::Machine)),
     picto!(1, "Linsensenkkopf", |c, u| screw(c, u, Head::RaisedCountersunk, Thread::Machine)),
-    picto!(2, "Linsenkopf", |c, u| screw(c, u, Head::Pan, Thread::Machine)),
     picto!(3, "Halbrundkopf", |c, u| screw(c, u, Head::Round, Thread::Machine)),
     picto!(4, "Flachrundkopf", |c, u| screw(c, u, Head::Truss, Thread::Machine)),
-    picto!(5, "Zylinderkopf", |c, u| screw(c, u, Head::Cheese, Thread::Machine)),
-    picto!(6, "Sechskantkopf", |c, u| screw(c, u, Head::Hex, Thread::Machine)),
+    picto!(13, "Zylinderkopf Schlitz", |c, u| screw(c, u, Head::Cheese, Thread::Machine)),
     picto!(7, "Schlossschraube", |c, u| screw(c, u, Head::Carriage, Thread::Machine)),
     picto!(8, "Flügelschraube", |c, u| screw(c, u, Head::Wing, Thread::Machine)),
     picto!(9, "Rändelschraube", |c, u| screw(c, u, Head::Knurled, Thread::Machine)),
     picto!(10, "Madenschraube", |c, u| {
-        thread(c, u, 0.1, 0.9, 0.085, 0.115, 0.055, Tip::Blunt);
-        u.fill_rect(c, 0.08, 0.46, 0.15, 0.54, 0.0);
+        thread(c, u, 0.08, 0.92, SHANK - 0.032, SHANK, 0.085, Tip::Blunt);
+        socket(c, u, 0.08, 0.1, 0.07);
     }),
 ];
 
 /// Thread kinds.
 pub const THREADS: &[Picto] = &[
-    picto!(16, "Holzschraube", |c, u| screw(c, u, Head::Countersunk, Thread::Wood)),
-    picto!(17, "Spanplattenschraube", |c, u| screw(c, u, Head::Countersunk, Thread::Chipboard)),
-    picto!(18, "Maschinenschraube", |c, u| screw(c, u, Head::Cheese, Thread::Machine)),
-    picto!(19, "Blechschraube", |c, u| screw(c, u, Head::Pan, Thread::Sheet)),
+    picto!(16, "Holzschraube", |c, u| screw(c, u, Head::CountersunkCross, Thread::Wood)),
+    picto!(17, "Spanplattenschraube", |c, u| screw(c, u, Head::CountersunkCross, Thread::Chipboard)),
+    picto!(18, "Maschinenschraube", |c, u| screw(c, u, Head::SocketCap, Thread::Machine)),
+    picto!(19, "Blechschraube", |c, u| screw(c, u, Head::PanCross, Thread::Sheet)),
     picto!(20, "Bohrschraube", |c, u| screw(c, u, Head::Hex, Thread::Drill)),
     picto!(21, "Gewindestange", |c, u| thread(c, u, 0.04, 0.96, 0.085, 0.115, 0.055, Tip::Blunt)),
     picto!(22, "Stockschraube", |c, u| {
@@ -247,7 +341,7 @@ pub const THREADS: &[Picto] = &[
         u.fill_rect(c, 0.43, 0.42, 0.52, 0.58, 1.0);
         thread(c, u, 0.52, 0.96, 0.06, 0.13, 0.09, Tip::Point);
     }),
-    picto!(23, "Holzschraube Linsenkopf", |c, u| screw(c, u, Head::Pan, Thread::Wood)),
+    picto!(23, "Holzschraube Linsenkopf", |c, u| screw(c, u, Head::PanCross, Thread::Wood)),
 ];
 
 /// Drives (top view).
