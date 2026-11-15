@@ -53,7 +53,7 @@ async fn handle(cmd: Cmd, shared: Shared, send: &dyn Fn(Ev)) {
                     *shared.borrow_mut() = Some(p);
                     match r {
                         Ok(info) => send(Ev::Info(info)),
-                        Err(e) => send(Ev::Error(e.to_string())),
+                        Err(e) => send(Ev::Error(diagnose(&e))),
                     }
                 }
                 Err(katasymbol_core::Error::Link(m)) if m == katasymbol_web::NOT_A_PRINTER => {
@@ -119,5 +119,11 @@ fn fail(e: katasymbol_core::Error, shared: &Shared, send: &dyn Fn(Ev)) {
         shared.borrow_mut().take();
         send(Ev::Connected(false));
     }
-    send(Ev::Error(e.to_string()));
+    send(Ev::Error(diagnose(&e)));
+}
+
+/// The error text, with how many answers the printer sent so far: tells a
+/// browser that drops notifications apart from a printer that is silent.
+fn diagnose(e: &katasymbol_core::Error) -> String {
+    format!("{e} (Antworten vom Drucker bisher: {})", katasymbol_web::notifications_seen())
 }

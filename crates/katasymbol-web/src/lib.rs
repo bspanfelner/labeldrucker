@@ -43,6 +43,39 @@ async fn sleep_ms(ms: i32) {
     let _ = JsFuture::from(p).await;
 }
 
+thread_local! {
+    static NOTIFICATIONS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// How many notifications the printer has sent so far (for diagnostics).
+pub fn notifications_seen() -> u32 {
+    NOTIFICATIONS.with(Cell::get)
+}
+
+/// The bytes of a notification value (a `DataView`, or any buffer).
+fn bytes_of(v: &JsValue) -> Option<Vec<u8>> {
+    if v.is_undefined() || v.is_null() {
+        return None;
+    }
+    if let Some(view) = v.dyn_ref::<js_sys::DataView>() {
+        let a = js_sys::Uint8Array::new_with_byte_offset_and_length(
+            &view.buffer(),
+            view.byte_offset() as u32,
+            view.byte_length() as u32,
+        );
+        return Some(a.to_vec());
+    }
+    if v.is_instance_of::<js_sys::ArrayBuffer>() || v.is_instance_of::<js_sys::Uint8Array>() || js_sys::Array::is_array(v) {
+        return Some(js_sys::Uint8Array::new(v).to_vec());
+    }
+    // A view from another realm: use its buffer, offset and length.
+    let get = |k: &str| js_sys::Reflect::get(v, &k.into()).ok();
+    let buffer = get("buffer").filter(|b| b.is_instance_of::<js_sys::ArrayBuffer>())?;
+    let offset = get("byteOffset").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32;
+    let len = get("byteLength").and_then(|x| x.as_f64())? as u32;
+    Some(js_sys::Uint8Array::new_with_byte_offset_and_length(&buffer, offset, len).to_vec())
+}
+
 /// Chooser options: every device, or printer-like ones by name and (with
 /// `maker`) by the E16's manufacturer data (company 0x0000, value = its
 /// address). No service filter: the E16 does not advertise its service, and
@@ -130,20 +163,30 @@ impl WebLink {
 
         let queue = Rc::new(RefCell::new(VecDeque::new()));
         let q = queue.clone();
+        let source = notify.clone();
+        let last = RefCell::new(JsValue::UNDEFINED);
+        // Tolerant of how the browser delivers the value: Bluefy (iOS) is a
+        // polyfill and need not match Chrome's event exactly. Never panic
+        // here: a trap in an event handler would silently drop every answer.
         let on_value = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
-            let ch: BluetoothRemoteGattCharacteristic = ev.target().expect("event target").unchecked_into();
-            if let Some(view) = ch.value() {
-                let bytes = js_sys::Uint8Array::new_with_byte_offset_and_length(
-                    &view.buffer(),
-                    view.byte_offset() as u32,
-                    view.byte_length() as u32,
-                );
-                q.borrow_mut().push_back(bytes.to_vec());
+            // The same event may arrive through both the listener and the
+            // `on…` property.
+            let ev_val: &JsValue = ev.as_ref();
+            if js_sys::Object::is(&last.borrow(), ev_val) {
+                return;
+            }
+            *last.borrow_mut() = ev_val.clone();
+            let from = |o: &JsValue| js_sys::Reflect::get(o, &"value".into()).ok().and_then(|v| bytes_of(&v));
+            let bytes = ev.target().and_then(|t| from(&t)).or_else(|| from(ev_val)).or_else(|| from(&source));
+            if let Some(b) = bytes {
+                NOTIFICATIONS.with(|n| n.set(n.get() + 1));
+                q.borrow_mut().push_back(b);
             }
         });
         notify
             .add_event_listener_with_callback("characteristicvaluechanged", on_value.as_ref().unchecked_ref())
             .map_err(js_err)?;
+        let _ = js_sys::Reflect::set(&notify, &"oncharacteristicvaluechanged".into(), on_value.as_ref());
         JsFuture::from(notify.start_notifications()).await.map_err(js_err)?;
 
         let connected = Rc::new(Cell::new(true));
