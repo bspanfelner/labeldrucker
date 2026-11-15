@@ -495,14 +495,15 @@ impl App {
             self.message = None;
             self.worker.send(Cmd::Probe { addr: self.addr.clone() });
         } else {
-            self.scan();
+            self.scan(false);
         }
     }
 
-    fn scan(&mut self) {
+    /// Native: look for printers. Web: open the chooser (`all`: every device).
+    fn scan(&mut self, all: bool) {
         self.busy = true;
         self.message = None;
-        self.worker.send(Cmd::Scan);
+        self.worker.send(Cmd::Scan { all });
     }
 
     fn print(&mut self) {
@@ -544,6 +545,15 @@ impl App {
                         }
                     }
                 });
+                } else if !self.connected {
+                    ui.menu_button(RichText::new(I_COG).size(16.0), |ui| {
+                        ui.set_min_width(260.0);
+                        ui.label(RichText::new("Drucker nicht in der Liste?").small().weak());
+                        if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_BLUETOOTH}  Alle Geräte zeigen"))).clicked() {
+                            self.scan(true);
+                            ui.close();
+                        }
+                    });
                 }
                 if self.connected {
                     if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_UNLINK}  Trennen"))).clicked() {
@@ -553,7 +563,7 @@ impl App {
                     self.connect();
                 }
                 if !BROWSER_CHOOSER && ui.add_enabled(!self.busy, egui::Button::new((ic(I_SEARCH), "Suchen"))).clicked() {
-                    self.scan();
+                    self.scan(false);
                 }
                 if !self.narrow {
                     ui.add_space(6.0);

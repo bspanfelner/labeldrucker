@@ -38,12 +38,12 @@ impl Worker {
 
 async fn handle(cmd: Cmd, shared: Shared, send: &dyn Fn(Ev)) {
     match cmd {
-        Cmd::Scan => {
+        Cmd::Scan { all } => {
             if let Some(p) = shared.borrow_mut().take() {
                 p.into_link().disconnect();
             }
             send(Ev::Progress("Drucker im Browser-Dialog wählen …".into()));
-            match WebLink::request().await {
+            match WebLink::request(all).await {
                 Ok(link) => {
                     let name = link.name().unwrap_or_else(|| "Drucker".into());
                     send(Ev::Device { addr: name.clone(), name });
@@ -56,7 +56,10 @@ async fn handle(cmd: Cmd, shared: Shared, send: &dyn Fn(Ev)) {
                         Err(e) => send(Ev::Error(e.to_string())),
                     }
                 }
-                Err(e) => send(Ev::Error(format!("Keine Verbindung: {e}"))),
+                Err(e) => send(Ev::Error(format!(
+                    "Keine Verbindung: {e}{}",
+                    if all { "" } else { " – Drucker nicht in der Liste? Ist er an und mit keinem anderen Gerät verbunden? Sonst ⚙ → „Alle Geräte zeigen“." }
+                ))),
             }
         }
         Cmd::Disconnect => {

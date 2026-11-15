@@ -13,7 +13,7 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window", "Navigator", "Performance", "Event", "EventTarget",
-    "Bluetooth", "BluetoothDevice", "BluetoothRemoteGattServer",
+    "Bluetooth", "BluetoothDevice", "BluetoothLeScanFilterInit", "BluetoothRemoteGattServer",
     "BluetoothRemoteGattService", "BluetoothRemoteGattCharacteristic",
     "RequestDeviceOptions",
 ] }

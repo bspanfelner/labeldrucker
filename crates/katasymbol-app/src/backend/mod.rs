@@ -28,7 +28,8 @@ pub const BROWSER_CHOOSER: bool = cfg!(target_arch = "wasm32");
 
 pub enum Cmd {
     /// Find printers (native) or open the device chooser and connect (web).
-    Scan,
+    /// `all`: the browser's chooser lists every device, not just printers.
+    Scan { all: bool },
     Probe { addr: String },
     Print { addr: String, page: Page, density: u8, copies: u32 },
     Disconnect,

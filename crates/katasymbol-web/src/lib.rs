@@ -18,6 +18,9 @@ use web_sys::{BluetoothDevice, BluetoothRemoteGattCharacteristic, RequestDeviceO
 pub const SERVICE: &str = "0000e0ff-3c17-d293-8e48-14fe2e4da212";
 const NOTIFY: &str = "0000ffe1-0000-1000-8000-00805f9b34fb";
 const WRITE: &str = "0000ffe9-0000-1000-8000-00805f9b34fb";
+/// Name prefixes of Katasymbol/Supvan printers: the E16 advertises its
+/// serial (`T0105A…`) and calls itself `T16` once connected.
+pub const NAME_PREFIXES: &[&str] = &["T0", "T1", "E1", "Katasymbol", "KATASYMBOL", "Supvan", "SUPVAN"];
 /// How often `recv` looks at the notification queue.
 const RECV_POLL_MS: i32 = 2;
 
@@ -52,13 +55,28 @@ pub struct WebLink {
 impl WebLink {
     /// Show the browser's device chooser and connect to the chosen printer.
     /// Must be called from a user gesture (e.g. a click handler).
-    pub async fn request() -> Result<Self> {
+    ///
+    /// Unless `all`, the chooser lists only devices that advertise the
+    /// Supvan service or carry a printer-like name (see [`NAME_PREFIXES`]).
+    pub async fn request(all: bool) -> Result<Self> {
         let bt = web_sys::window()
             .map(|w| w.navigator().bluetooth())
             .ok_or_else(|| Error::Link("no window".into()))?
             .ok_or_else(|| Error::Link("this browser has no Web Bluetooth".into()))?;
         let opts = RequestDeviceOptions::new();
-        opts.set_accept_all_devices(true);
+        if all {
+            opts.set_accept_all_devices(true);
+        } else {
+            let service = web_sys::BluetoothLeScanFilterInit::new();
+            service.set_services(&[js_sys::JsString::from(SERVICE)]);
+            let mut filters = vec![service];
+            for prefix in NAME_PREFIXES {
+                let f = web_sys::BluetoothLeScanFilterInit::new();
+                f.set_name_prefix(prefix);
+                filters.push(f);
+            }
+            opts.set_filters(&filters);
+        }
         opts.set_optional_services(&[js_sys::JsString::from(SERVICE)]);
         let device: BluetoothDevice = JsFuture::from(bt.request_device(&opts)).await.map_err(js_err)?.unchecked_into();
         Self::connect(device).await

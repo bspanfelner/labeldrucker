@@ -113,7 +113,7 @@ struct State<T: Transport> {
 impl<T: Transport> State<T> {
     fn handle(&mut self, cmd: Cmd, send: &dyn Fn(Ev)) {
         match cmd {
-            Cmd::Scan => {
+            Cmd::Scan { .. } => {
                 send(Ev::Progress("Suche Drucker (8 s) …".into()));
                 match self.transport.scan(8) {
                     Ok(found) => send(Ev::Found(found)),
