@@ -584,7 +584,9 @@ impl App {
         if self.narrow {
             ui.horizontal(|ui| {
                 self.status_chip(ui);
-                ui.label(RichText::new(BUILD).small().weak());
+                // Just the commit on phones; the full build on hover.
+                let short = BUILD.split(' ').next().unwrap_or(BUILD);
+                ui.label(RichText::new(short).small().weak()).on_hover_text(BUILD);
             });
         }
     }
