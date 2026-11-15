@@ -271,11 +271,15 @@ impl WebLink {
 impl Link for WebLink {
     async fn write(&mut self, chunk: &[u8]) -> Result<()> {
         self.check()?;
-        let mut buf = chunk.to_vec();
+        // A standalone ArrayBuffer of exactly this chunk. A `&[u8]` would
+        // reach JS as a view into the whole wasm memory, and a browser that
+        // sends `view.buffer` (Bluefy on iOS, apparently) ignores the offset
+        // and length and sends garbage the printer never answers.
+        let buf = js_sys::Uint8Array::from(chunk).buffer();
         let promise = if write_with_response() {
-            self.write.write_value_with_response_with_u8_slice(&mut buf)
+            self.write.write_value_with_response_with_buffer_source(&buf)
         } else {
-            self.write.write_value_without_response_with_u8_slice(&mut buf)
+            self.write.write_value_without_response_with_buffer_source(&buf)
         };
         let r = match promise {
             Ok(p) => JsFuture::from(p).await.map(drop),

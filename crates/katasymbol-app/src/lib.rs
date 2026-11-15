@@ -532,7 +532,9 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{I_TAG}  Katasymbol")).heading().strong());
-            ui.label(RichText::new(BUILD).small().weak()).on_hover_text("Version dieses Programms");
+            if !self.narrow {
+                ui.label(RichText::new(BUILD).small().weak()).on_hover_text("Version dieses Programms");
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Address and found devices, tucked away (not in the browser,
                 // where the browser's chooser picks the device).
@@ -580,7 +582,10 @@ impl App {
             });
         });
         if self.narrow {
-            self.status_chip(ui);
+            ui.horizontal(|ui| {
+                self.status_chip(ui);
+                ui.label(RichText::new(BUILD).small().weak());
+            });
         }
     }
 
@@ -594,6 +599,7 @@ impl App {
                 let color = if i.status.error().is_some() { Color32::from_rgb(0xd9, 0x82, 0x1e) } else { OK };
                 (color, format!("{}  ·  {state}{labels}", i.name.as_deref().unwrap_or("Drucker")))
             }
+            _ if self.connected && !self.busy => (Color32::from_rgb(0xd9, 0x82, 0x1e), "Verbunden – Drucker antwortet nicht".into()),
             _ if BROWSER_CHOOSER => (Color32::GRAY, "Nicht verbunden – „Verbinden“ klicken".into()),
             _ if valid_addr(self.addr.trim()) => {
                 let who = self.found.iter().find(|f| f.addr == self.addr.trim()).map_or(self.addr.trim(), |f| f.name.as_str());
