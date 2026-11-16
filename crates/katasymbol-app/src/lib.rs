@@ -522,7 +522,8 @@ impl App {
     fn print(&mut self) {
         let Some(page) = self.page.clone() else { return };
         self.addr = normalize_addr(&self.addr);
-        if BROWSER_CHOOSER && !self.connected {
+        // In the browser a remembered printer reconnects by itself.
+        if BROWSER_CHOOSER && !self.connected && self.device_name.is_none() {
             self.message = Some(("Nicht verbunden – erst „Verbinden“ klicken.".into(), true));
             return;
         }
@@ -583,6 +584,7 @@ impl App {
                 }
                 if self.connected {
                     if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_UNLINK}  Trennen"))).clicked() {
+                        self.device_name = None;
                         self.worker.send(Cmd::Disconnect);
                     }
                 } else if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_BLUETOOTH}  Verbinden"))).clicked() {
@@ -618,6 +620,9 @@ impl App {
                 (color, format!("{}  ·  {state}{labels}", i.name.as_deref().unwrap_or("Drucker")))
             }
             _ if self.connected && !self.busy => (Color32::from_rgb(0xd9, 0x82, 0x1e), "Verbunden – Drucker antwortet nicht".into()),
+            _ if BROWSER_CHOOSER && self.device_name.is_some() => {
+                (Color32::GRAY, format!("{} schläft – verbindet sich beim Drucken neu", self.device_name.as_deref().unwrap_or("Drucker")))
+            }
             _ if BROWSER_CHOOSER => (Color32::GRAY, "Nicht verbunden – „Verbinden“ klicken".into()),
             _ if valid_addr(self.addr.trim()) => {
                 let who = self.found.iter().find(|f| f.addr == self.addr.trim()).map_or(self.addr.trim(), |f| f.name.as_str());

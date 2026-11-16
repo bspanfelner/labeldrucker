@@ -12,7 +12,8 @@ use std::rc::Rc;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{BluetoothDevice, BluetoothRemoteGattCharacteristic, RequestDeviceOptions};
+pub use web_sys::BluetoothDevice;
+use web_sys::{BluetoothRemoteGattCharacteristic, RequestDeviceOptions};
 
 /// The Supvan service; `ffe1`/`ffe9` live under it with Bluetooth-base UUIDs.
 pub const SERVICE: &str = "0000e0ff-3c17-d293-8e48-14fe2e4da212";
@@ -201,9 +202,11 @@ async fn choose(bt: &web_sys::Bluetooth, opts: &RequestDeviceOptions) -> std::re
 /// A Web Bluetooth GATT connection to one printer.
 pub struct WebLink {
     device: BluetoothDevice,
+    notify: BluetoothRemoteGattCharacteristic,
     write: BluetoothRemoteGattCharacteristic,
     queue: Rc<RefCell<VecDeque<Vec<u8>>>>,
     connected: Rc<Cell<bool>>,
+    on_lost: Rc<RefCell<Option<Box<dyn Fn()>>>>,
     // Kept alive for as long as the link exists.
     _on_value: Closure<dyn FnMut(web_sys::Event)>,
     _on_disconnect: Closure<dyn FnMut(web_sys::Event)>,
@@ -300,20 +303,39 @@ impl WebLink {
         JsFuture::from(notify.start_notifications()).await.map_err(js_err)?;
 
         let connected = Rc::new(Cell::new(true));
-        let c = connected.clone();
+        let on_lost: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+        let (c, lost) = (connected.clone(), on_lost.clone());
         let on_disconnect = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
             trace("-- Drucker hat die Verbindung getrennt");
             c.set(false);
+            if let Some(f) = lost.borrow().as_ref() {
+                f();
+            }
         });
         device
             .add_event_listener_with_callback("gattserverdisconnected", on_disconnect.as_ref().unchecked_ref())
             .map_err(js_err)?;
 
-        Ok(Self { device, write, queue, connected, _on_value: on_value, _on_disconnect: on_disconnect })
+        Ok(Self { device, notify, write, queue, connected, on_lost, _on_value: on_value, _on_disconnect: on_disconnect })
     }
 
     pub fn name(&self) -> Option<String> {
         self.device.name()
+    }
+
+    /// The chosen device: [`WebLink::connect`] reconnects to it without the
+    /// chooser (and without a user gesture).
+    pub fn device(&self) -> BluetoothDevice {
+        self.device.clone()
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected.get()
+    }
+
+    /// Called when the printer drops the connection (e.g. powers off).
+    pub fn on_lost(&self, f: impl Fn() + 'static) {
+        *self.on_lost.borrow_mut() = Some(Box::new(f));
     }
 
     pub fn disconnect(&self) {
@@ -324,6 +346,19 @@ impl WebLink {
 
     fn check(&self) -> Result<()> {
         if self.connected.get() { Ok(()) } else { Err(Error::Link("printer disconnected".into())) }
+    }
+}
+
+impl Drop for WebLink {
+    /// Unhook the event handlers (their closures die with the link; a later
+    /// connection to the same device registers its own).
+    fn drop(&mut self) {
+        let f: &js_sys::Function = self._on_value.as_ref().unchecked_ref();
+        let _ = self.notify.remove_event_listener_with_callback("characteristicvaluechanged", f);
+        let _ = js_sys::Reflect::set(&self.notify, &"oncharacteristicvaluechanged".into(), &JsValue::NULL);
+        let _ = self.device.remove_event_listener_with_callback("characteristicvaluechanged", f);
+        let g: &js_sys::Function = self._on_disconnect.as_ref().unchecked_ref();
+        let _ = self.device.remove_event_listener_with_callback("gattserverdisconnected", g);
     }
 }
 

@@ -58,6 +58,10 @@ impl<L: Link> Printer<L> {
         self.link
     }
 
+    pub fn link(&self) -> &L {
+        &self.link
+    }
+
     async fn write_frame(&mut self, frame: &[u8]) -> Result<()> {
         let size = self.link.chunk_size().max(1);
         for (i, chunk) in frame.chunks(size).enumerate() {
