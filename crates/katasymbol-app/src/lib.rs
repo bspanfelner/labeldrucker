@@ -3,6 +3,7 @@
 //! Runs natively (Linux, macOS, Windows) and in the browser (WebAssembly).
 
 mod backend;
+pub mod keyboard;
 mod preview;
 mod render;
 mod sidebar;
@@ -542,7 +543,8 @@ impl App {
                 ui.menu_button(RichText::new(I_COG).size(16.0), |ui| {
                     ui.set_min_width(300.0);
                     ui.label(RichText::new("Bluetooth-Adresse").small().weak());
-                    ui.add(egui::TextEdit::singleline(&mut self.addr).hint_text("AA:BB:CC:DD:EE:FF").desired_width(280.0));
+                    let r = ui.add(egui::TextEdit::singleline(&mut self.addr).hint_text("AA:BB:CC:DD:EE:FF").desired_width(280.0));
+                    keyboard::field(ui, &r);
                     if !self.found.is_empty() {
                         ui.separator();
                         ui.label(RichText::new("Gefundene Geräte").small().weak());
@@ -734,6 +736,7 @@ pub fn page_image(page: &Page) -> ColorImage {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        keyboard::begin_frame(ctx);
         self.poll(ctx);
         self.update_page(ctx);
 

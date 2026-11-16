@@ -77,17 +77,19 @@ impl App {
     fn text_section(&mut self, ui: &mut egui::Ui) {
         section(ui, I_FONT, "Text", |ui| {
             let d = &mut self.design;
-            ui.add(
+            let r = ui.add(
                 egui::TextEdit::multiline(&mut d.label.text)
                     .font(egui::FontId::proportional(17.0))
                     .hint_text("Text eingeben … (Enter für neue Zeile)")
                     .desired_rows(3)
                     .desired_width(f32::INFINITY),
             );
+            crate::keyboard::field(ui, &r);
 
             // Font family with a filter.
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.font_filter).hint_text("Schrift suchen …").desired_width(130.0));
+                let r = ui.add(egui::TextEdit::singleline(&mut self.font_filter).hint_text("Schrift suchen …").desired_width(130.0));
+                crate::keyboard::field(ui, &r);
                 let filter = self.font_filter.to_lowercase();
                 let families = &self.fonts.families;
                 egui::ComboBox::from_id_salt("family")
@@ -212,7 +214,8 @@ impl App {
                 });
             });
             ui.add_space(4.0);
-            ui.add(egui::TextEdit::singleline(&mut self.icon_filter).hint_text("Symbol suchen … (z. B. Schraube, Torx, Herz)").desired_width(f32::INFINITY));
+            let r = ui.add(egui::TextEdit::singleline(&mut self.icon_filter).hint_text("Symbol suchen … (z. B. Schraube, Torx, Herz)").desired_width(f32::INFINITY));
+            crate::keyboard::field(ui, &r);
             let filter = self.icon_filter.trim().to_lowercase();
             // Group tabs (hidden while searching).
             if filter.is_empty() {

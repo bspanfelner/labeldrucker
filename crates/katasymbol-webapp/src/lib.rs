@@ -24,6 +24,14 @@ pub fn start() {
     });
 }
 
+/// For the page's `touchend` handler: is there a text field at this CSS
+/// pixel position in a canvas `css_width` pixels wide? (See
+/// `katasymbol_app::keyboard`.)
+#[wasm_bindgen]
+pub fn text_field_at(x: f32, y: f32, css_width: f32) -> bool {
+    katasymbol_app::keyboard::text_field_at(x, y, css_width)
+}
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = error)]
