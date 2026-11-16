@@ -18,6 +18,26 @@ the Bluetooth link differs: raw LE L2CAP socket on Linux (`katasymbol-linux`),
 CoreBluetooth via btleplug on macOS (`katasymbol-btle`), Web Bluetooth in the
 browser (`katasymbol-web`, started by `katasymbol-webapp`).
 
+### Web app on Linux (Chromium/Chrome)
+
+The E16 is dual-mode (classic Bluetooth and Bluetooth LE). When a browser asks
+BlueZ to connect, BlueZ usually picks classic Bluetooth, where the printer has no
+print service, and fails with `org.bluez.Error.BREDR.ProfileUnavailable`. The
+Linux app avoids BlueZ's choice (raw LE socket) and is the recommended way on
+Linux. To use the web app anyway, tell BlueZ to reach this printer over LE
+(needs root; `PreferredBearer` is an experimental BlueZ feature, 5.7x+):
+
+```sh
+sudo sed -i 's/^#\?Experimental = .*/Experimental = true/' /etc/bluetooth/main.conf
+sudo systemctl restart bluetooth
+bluetoothctl --timeout 8 scan le            # printer on
+bluetoothctl trust A4:93:40:3E:7B:0C        # your printer's address; keeps the setting
+busctl set-property org.bluez /org/bluez/hci0/dev_A4_93_40_3E_7B_0C org.bluez.Device1 PreferredBearer s le
+```
+
+Without any classic Bluetooth devices, `ControllerMode = le` in the same file does
+it too (for all devices).
+
 `.github/workflows/build.yml` builds Linux, macOS and web on GitHub (manually or on a
 `v*` tag), attaches them to a release and publishes the web app on GitHub Pages.
 

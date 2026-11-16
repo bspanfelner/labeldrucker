@@ -39,11 +39,53 @@ pub fn chunk_size() -> usize {
         .unwrap_or(WEB_CHUNK)
 }
 
+/// How long `gatt.connect()` may take.
+const CONNECT_TIMEOUT_MS: i32 = 15_000;
+
+/// `promise`, or a rejection with "timeout" after `ms`.
+async fn with_timeout(promise: js_sys::Promise, ms: i32) -> std::result::Result<JsValue, JsValue> {
+    let timeout = js_sys::Promise::new(&mut |_, reject| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_1(&reject, ms, &"timeout".into());
+        }
+    });
+    JsFuture::from(js_sys::Promise::race(&js_sys::Array::of2(&promise, &timeout))).await
+}
+
+/// The message for a failed GATT connect, with the Linux cause spelled out.
+fn connect_failed(e: JsValue) -> String {
+    let linux = web_sys::window()
+        .and_then(|w| w.navigator().user_agent().ok())
+        .is_some_and(|ua| ua.contains("Linux") && !ua.contains("Android"));
+    let what = if e.as_string().as_deref() == Some("timeout") { "keine Verbindung nach 15 s".to_string() } else { js_message(&e) };
+    if linux {
+        format!(
+            "Verbindung fehlgeschlagen ({what}). Unter Linux verbindet BlueZ diesen Drucker meist über klassisches \
+             Bluetooth statt über Bluetooth LE. Abhilfe: die Linux-App nehmen, oder BlueZ auf LE festlegen (siehe README)."
+        )
+    } else {
+        format!("Verbindung fehlgeschlagen ({what}). Ist der Drucker an und mit keinem anderen Gerät verbunden?")
+    }
+}
+
 /// How often `recv` looks at the notification queue.
 const RECV_POLL_MS: i32 = 2;
 
 fn js_err(e: JsValue) -> Error {
-    Error::Link(e.as_string().unwrap_or_else(|| format!("{e:?}")))
+    Error::Link(js_message(&e))
+}
+
+/// A JS error's text: the string itself, or an Error's `name: message`.
+fn js_message(e: &JsValue) -> String {
+    if let Some(s) = e.as_string() {
+        return s;
+    }
+    let get = |k: &str| js_sys::Reflect::get(e, &k.into()).ok().and_then(|v| v.as_string());
+    match (get("name"), get("message")) {
+        (Some(n), Some(m)) => format!("{n}: {m}"),
+        (None, Some(m)) => m,
+        _ => format!("{e:?}"),
+    }
 }
 
 fn now_ms() -> f64 {
@@ -77,6 +119,8 @@ pub fn trace(line: impl AsRef<str>) {
         }
         tr.push_back(format!("{t:9.1} {}", line.as_ref()));
     });
+    // Also in the browser console (DevTools, or remote debugging).
+    web_sys::console::debug_1(&format!("[katasymbol] {}", line.as_ref()).into());
 }
 
 /// The link trace so far, one event per line, for bug reports.
@@ -245,7 +289,14 @@ impl WebLink {
             if write_with_response() { "mit Antwort" } else { "ohne Antwort" }
         ));
         let gatt = device.gatt().ok_or_else(|| Error::Link("device has no GATT server".into()))?;
-        let server: web_sys::BluetoothRemoteGattServer = JsFuture::from(gatt.connect()).await.map_err(js_err)?.unchecked_into();
+        let server: web_sys::BluetoothRemoteGattServer = match with_timeout(gatt.connect().unchecked_into(), CONNECT_TIMEOUT_MS).await {
+            Ok(s) => s.unchecked_into(),
+            Err(e) => {
+                gatt.disconnect();
+                trace(format!("-- Verbindung fehlgeschlagen: {}", js_message(&e)));
+                return Err(Error::Link(connect_failed(e)));
+            }
+        };
         let service: web_sys::BluetoothRemoteGattService =
             match JsFuture::from(server.get_primary_service_with_str(SERVICE)).await {
                 Ok(s) => s.unchecked_into(),
