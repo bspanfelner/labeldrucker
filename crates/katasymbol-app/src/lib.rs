@@ -543,8 +543,7 @@ impl App {
                 ui.menu_button(RichText::new(I_COG).size(16.0), |ui| {
                     ui.set_min_width(300.0);
                     ui.label(RichText::new("Bluetooth-Adresse").small().weak());
-                    let r = ui.add(egui::TextEdit::singleline(&mut self.addr).hint_text("AA:BB:CC:DD:EE:FF").desired_width(280.0));
-                    keyboard::field(ui, &r);
+                    ui.add(egui::TextEdit::singleline(&mut self.addr).hint_text("AA:BB:CC:DD:EE:FF").desired_width(280.0));
                     if !self.found.is_empty() {
                         ui.separator();
                         ui.label(RichText::new("Gefundene Geräte").small().weak());
@@ -781,6 +780,7 @@ impl eframe::App for App {
         if self.rendered.as_ref() != Some(&self.design) {
             ctx.request_repaint();
         }
+        keyboard::end_frame(ctx);
         self.handle_screenshot(ctx);
     }
 

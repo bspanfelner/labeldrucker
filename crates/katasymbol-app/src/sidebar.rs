@@ -77,19 +77,15 @@ impl App {
     fn text_section(&mut self, ui: &mut egui::Ui) {
         section(ui, I_FONT, "Text", |ui| {
             let d = &mut self.design;
-            let r = ui.add(
-                egui::TextEdit::multiline(&mut d.label.text)
-                    .font(egui::FontId::proportional(17.0))
-                    .hint_text("Text eingeben … (Enter für neue Zeile)")
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY),
-            );
-            crate::keyboard::field(ui, &r);
+            crate::keyboard::text_edit(ui, "label-text", &mut d.label.text, true, "Text eingeben … (Enter für neue Zeile)", |t| {
+                egui::TextEdit::multiline(t).font(egui::FontId::proportional(17.0)).desired_rows(3).desired_width(f32::INFINITY)
+            });
 
             // Font family with a filter.
             ui.horizontal(|ui| {
-                let r = ui.add(egui::TextEdit::singleline(&mut self.font_filter).hint_text("Schrift suchen …").desired_width(130.0));
-                crate::keyboard::field(ui, &r);
+                crate::keyboard::text_edit(ui, "font-filter", &mut self.font_filter, false, "Schrift suchen …", |t| {
+                    egui::TextEdit::singleline(t).desired_width(130.0)
+                });
                 let filter = self.font_filter.to_lowercase();
                 let families = &self.fonts.families;
                 egui::ComboBox::from_id_salt("family")
@@ -214,8 +210,9 @@ impl App {
                 });
             });
             ui.add_space(4.0);
-            let r = ui.add(egui::TextEdit::singleline(&mut self.icon_filter).hint_text("Symbol suchen … (z. B. Schraube, Torx, Herz)").desired_width(f32::INFINITY));
-            crate::keyboard::field(ui, &r);
+            crate::keyboard::text_edit(ui, "icon-filter", &mut self.icon_filter, false, "Symbol suchen … (z. B. Schraube, Torx, Herz)", |t| {
+                egui::TextEdit::singleline(t).desired_width(f32::INFINITY)
+            });
             let filter = self.icon_filter.trim().to_lowercase();
             // Group tabs (hidden while searching).
             if filter.is_empty() {

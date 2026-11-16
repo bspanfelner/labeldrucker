@@ -18,8 +18,6 @@
   #loading.problem { pointer-events: auto; }
   #nobt { display: none; color: #ffb74d; }
   #problem { display: none; color: #ff8a80; max-width: 36em; margin-top: 12px; }
-  /* eframe's hidden text input: 16px keeps iOS from zooming in on focus. */
-  body > input[type=text] { font-size: 16px; }
   #problem code { background: #333; padding: 2px 6px; border-radius: 4px; color: #eee; }
 </style>
 </head>
@@ -60,18 +58,6 @@
       const v = encodeURIComponent(build);
       const app = await import(`./pkg/katasymbol_webapp.js?v=${v}`);
       await app.default({ module_or_path: `./pkg/katasymbol_webapp_bg.wasm?v=${v}` });
-      // iOS shows the keyboard only for a focus inside the tap itself; egui
-      // focuses its text input a frame later. So on a tap on a text field,
-      // focus that input right here. Capture phase: eframe stops the event
-      // from bubbling.
-      window.addEventListener("touchend", (e) => {
-        const t = e.changedTouches[0];
-        const canvas = document.getElementById("app");
-        const box = canvas.getBoundingClientRect();
-        if (!t || !app.text_field_at(t.clientX - box.left, t.clientY - box.top, box.width)) return;
-        const input = document.querySelector("body > input[type=text]");
-        if (input) { input.blur(); input.focus(); }
-      }, { capture: true });
     } catch (e) {
       console.error(e);
       problem(`Die App konnte nicht starten:<br><code>${String(e?.message ?? e)}</code>`);
