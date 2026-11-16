@@ -487,7 +487,12 @@ impl App {
                     self.found = found;
                 }
                 Ev::Progress(p) => self.message = Some((p, false)),
-                Ev::Printed => self.message = Some(("Gedruckt.".into(), false)),
+                Ev::Printed => {
+                    // Ready for the next job even if the status refresh after
+                    // printing fails (the printer may still be finishing).
+                    self.busy = false;
+                    self.message = Some(("Gedruckt.".into(), false));
+                }
                 Ev::Error(e) => {
                     self.message = Some((e, true));
                     self.busy = false;

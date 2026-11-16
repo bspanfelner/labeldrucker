@@ -215,16 +215,20 @@ mod web {
             response.mark_changed();
         }
 
-        let rect = response.rect;
+        // Full-width fields can reach past the clip rect sideways: what
+        // counts is the visible part, and that the field shows its full height.
+        let shown = response.rect.intersect(clip);
+        let whole = shown.height() >= response.rect.height() - 1.0 && shown.width() >= 24.0;
+        let rect = if whole { shown } else { response.rect };
         let popup = egui::Popup::is_any_open(&ctx);
         let focused = FIELDS.with(|f| f.borrow().get(key).is_some_and(|field| is_focused(&field.el)));
         // While typing, never hide the field (that would close the keyboard):
         // when the keyboard shrinks the window, scroll the field into view.
-        if focused && !clip.contains_rect(rect) {
+        if focused && !whole {
             response.scroll_to_me(Some(egui::Align::Center));
             ctx.request_repaint();
         }
-        let visible = focused || (clip.contains_rect(rect) && !popup);
+        let visible = focused || (whole && !popup);
         FIELDS.with(|f| {
             let mut f = f.borrow_mut();
             let Some(field) = f.get_mut(key) else { return };
