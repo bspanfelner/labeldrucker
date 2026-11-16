@@ -64,11 +64,14 @@ fn main() {
     // Hand-drawn pictograms, large: 6 per strip, 96 dots each.
     let mut big = Vec::new();
     for (_, ps) in katasymbol_core::pictos::GROUPS {
-        for chunk in ps.chunks(6) {
-            let mut c = Canvas::for_page(6 * 100);
+        // Wide pictograms one per strip at full height, square ones six.
+        let per = if ps.iter().any(|p| p.aspect > 1.5) { 2 } else { 6 };
+        for chunk in ps.chunks(per) {
+            let cell = 600.0 / per as f32;
+            let mut c = Canvas::for_page(600);
             for (k, p) in chunk.iter().enumerate() {
-                let x = k as f32 * 100.0;
-                icons::draw(&mut c, &icon_font, p.ch, Rect::new(x + 2.0, 0.0, x + 98.0, 96.0));
+                let x = k as f32 * cell;
+                icons::draw(&mut c, &icon_font, p.ch, Rect::new(x + 2.0, 0.0, x + cell - 2.0, 96.0));
             }
             big.push(c);
         }
@@ -77,8 +80,9 @@ fn main() {
 
     // Screw labels at print resolution, as they come out of the printer.
     let mut screws = Vec::new();
-    for p in katasymbol_core::pictos::HEADS.iter().take(6) {
-        let label = Label { length: 320, text: "M4×20".into(), icon_left: Some(p.ch), ..Label::default() };
+    for p in katasymbol_core::pictos::SCREWS.iter().chain(katasymbol_core::pictos::HEADS.iter().take(6)) {
+        let length = if p.aspect > 1.5 { 480 } else { 320 };
+        let label = Label { length, text: "M4×20".into(), icon_left: Some(p.ch), ..Label::default() };
         screws.push(label.canvas(&font, &icon_font, None));
     }
     save(&screws, 2, &format!("{dir}/screws.png"));

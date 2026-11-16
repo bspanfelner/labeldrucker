@@ -184,7 +184,7 @@ impl App {
                         let b = match icon {
                             Some(ch) => {
                                 let tex = self.icon_texture(&ctx, ch);
-                                egui::Button::image(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(34.0, 34.0)).tint(tint))
+                                egui::Button::image(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(34.0 * icons::aspect(ch).min(2.0), 34.0 / (icons::aspect(ch) / 2.0).max(1.0))).tint(tint))
                             }
                             None => egui::Button::new(RichText::new("–").size(24.0)),
                         };
@@ -248,7 +248,8 @@ impl App {
                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                 for ic in shown {
                     let tex = self.icon_texture(&ctx, ic.ch);
-                    let b = egui::Button::image(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(28.0, 28.0)).tint(tint))
+                    let a = icons::aspect(ic.ch);
+                    let b = egui::Button::image(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(28.0 * a, 28.0)).tint(tint))
                         .selected(current == Some(ic.ch))
                         .min_size(egui::vec2(40.0, 38.0));
                     if ui.add(b).on_hover_text(ic.name).clicked() {

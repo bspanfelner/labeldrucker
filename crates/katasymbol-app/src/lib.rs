@@ -384,11 +384,13 @@ impl App {
         if let Some(t) = self.icon_tex.get(&ch) {
             return t.clone();
         }
+        // Wide pictograms get a wide texture of the same height.
         const N: usize = 64;
-        let mut c = katasymbol_core::draw::Canvas::new(N, N);
-        icons::draw(&mut c, &self.icon_font, ch, katasymbol_core::draw::Rect::new(2.0, 2.0, N as f32 - 2.0, N as f32 - 2.0));
-        let pixels = (0..N * N).map(|i| Color32::from_white_alpha((c.get(i % N, i / N) * 255.0) as u8)).collect();
-        let img = ColorImage { size: [N, N], source_size: egui::vec2(N as f32, N as f32), pixels };
+        let w = (N as f32 * icons::aspect(ch)).round() as usize;
+        let mut c = katasymbol_core::draw::Canvas::new(w, N);
+        icons::draw(&mut c, &self.icon_font, ch, katasymbol_core::draw::Rect::new(2.0, 2.0, w as f32 - 2.0, N as f32 - 2.0));
+        let pixels = (0..w * N).map(|i| Color32::from_white_alpha((c.get(i % w, i / w) * 255.0) as u8)).collect();
+        let img = ColorImage { size: [w, N], source_size: egui::vec2(w as f32, N as f32), pixels };
         let t = ctx.load_texture(format!("icon-{:x}", ch as u32), img, TextureOptions::LINEAR);
         self.icon_tex.insert(ch, t.clone());
         t

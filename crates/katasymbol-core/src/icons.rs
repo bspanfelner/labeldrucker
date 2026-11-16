@@ -125,6 +125,11 @@ pub fn name(ch: char) -> Option<&'static str> {
 }
 
 /// Draw icon `ch` as large as fits into `r`.
+/// Width / height of icon `ch`: some pictograms are wide, font icons square.
+pub fn aspect(ch: char) -> f32 {
+    pictos::aspect(ch)
+}
+
 pub fn draw(c: &mut Canvas, font: &impl Font, ch: char, r: Rect) {
     if !pictos::draw(c, ch, r) {
         text::draw_glyph(c, font, ch, r);

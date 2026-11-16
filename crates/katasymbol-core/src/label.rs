@@ -84,20 +84,30 @@ impl Label {
         let mut body = content;
         let mut icons = [None, None];
         let mut separators = Vec::new();
-        let y0 = content.y0 + (content.h() - side) / 2.0;
+        // Wide pictograms get their width (at most half the content each),
+        // a narrower box then shrinks them in height.
+        let size = |ch: char| {
+            let a = crate::icons::aspect(ch).max(0.1);
+            let w = (side * a).min(content.w() / 2.0);
+            (w, w / a)
+        };
         if let Some(ch) = self.icon_left {
-            icons[0] = Some((ch, Rect::new(content.x0, y0, content.x0 + side, y0 + side)));
-            body.x0 += side + gap;
+            let (w, h) = size(ch);
+            let y0 = content.y0 + (content.h() - h) / 2.0;
+            icons[0] = Some((ch, Rect::new(content.x0, y0, content.x0 + w, y0 + h)));
+            body.x0 += w + gap;
             if self.separator {
-                let x = content.x0 + side + gap / 2.0 - sep_w / 2.0;
+                let x = content.x0 + w + gap / 2.0 - sep_w / 2.0;
                 separators.push(Rect::new(x, content.y0, x + sep_w, content.y1));
             }
         }
         if let Some(ch) = self.icon_right {
-            icons[1] = Some((ch, Rect::new(content.x1 - side, y0, content.x1, y0 + side)));
-            body.x1 -= side + gap;
+            let (w, h) = size(ch);
+            let y0 = content.y0 + (content.h() - h) / 2.0;
+            icons[1] = Some((ch, Rect::new(content.x1 - w, y0, content.x1, y0 + h)));
+            body.x1 -= w + gap;
             if self.separator {
-                let x = content.x1 - side - gap / 2.0 - sep_w / 2.0;
+                let x = content.x1 - w - gap / 2.0 - sep_w / 2.0;
                 separators.push(Rect::new(x, content.y0, x + sep_w, content.y1));
             }
         }

@@ -297,14 +297,143 @@ fn head_top(c: &mut Canvas, u: &U) -> P {
 pub struct Picto {
     pub ch: char,
     pub name: &'static str,
+    /// Width / height of the drawing (1 for square pictograms).
+    pub aspect: f32,
     draw: fn(&mut Canvas, &U),
 }
 
 macro_rules! picto {
     ($n:expr, $name:literal, $f:expr) => {
-        Picto { ch: match char::from_u32(FIRST + $n) { Some(c) => c, None => ' ' }, name: $name, draw: $f }
+        picto!($n, $name, 1.0, $f)
+    };
+    ($n:expr, $name:literal, $aspect:expr, $f:expr) => {
+        Picto { ch: match char::from_u32(FIRST + $n) { Some(c) => c, None => ' ' }, name: $name, aspect: $aspect, draw: $f }
     };
 }
+
+/// Maps the 300 × 100 drawing space of the wide screw pictograms (top view
+/// on the left, side view on the right) into the box.
+struct W<'a>(&'a U);
+
+impl W<'_> {
+    fn p(&self, x: f32, y: f32) -> P {
+        self.0.p(x / 300.0, y / 100.0)
+    }
+    /// A length in drawing units.
+    fn s(&self, d: f32) -> f32 {
+        self.0.s(d / 300.0)
+    }
+    fn fill(&self, c: &mut Canvas, pts: &[(f32, f32)], v: f32) {
+        c.fill(&pts.iter().map(|&(x, y)| self.p(x, y)).collect::<Vec<_>>(), v);
+    }
+    fn disc(&self, c: &mut Canvas, x: f32, y: f32, r: f32, v: f32) {
+        c.disc(self.p(x, y), self.s(r), v);
+    }
+    /// A ring of radius `r` and line width `w`.
+    fn ring(&self, c: &mut Canvas, x: f32, y: f32, r: f32, w: f32, v: f32) {
+        c.fill(&ellipse(self.p(x, y), self.s(r + w / 2.0), self.s(r + w / 2.0)), v);
+        c.fill(&ellipse(self.p(x, y), self.s(r - w / 2.0), self.s(r - w / 2.0)), 1.0 - v);
+    }
+    /// A regular hexagon with corners left and right.
+    fn hex(&self, c: &mut Canvas, x: f32, y: f32, r: f32, v: f32) {
+        let pts: Vec<(f32, f32)> = (0..6)
+            .map(|k| {
+                let a = k as f32 * std::f32::consts::FRAC_PI_3;
+                (x + r * a.cos(), y + r * a.sin())
+            })
+            .collect();
+        self.fill(c, &pts, v);
+    }
+    fn rect(&self, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32, v: f32) {
+        self.fill(c, &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)], v);
+    }
+}
+
+/// Cubic Bézier points from `a` to `d` (without `a`).
+fn bezier(a: (f32, f32), b: (f32, f32), c: (f32, f32), d: (f32, f32)) -> Vec<(f32, f32)> {
+    (1..=16)
+        .map(|i| {
+            let t = i as f32 / 16.0;
+            let m = 1.0 - t;
+            let f = |p: f32, q: f32, r: f32, s: f32| m * m * m * p + 3.0 * m * m * t * q + 3.0 * m * t * t * r + t * t * t * s;
+            (f(a.0, b.0, c.0, d.0), f(a.1, b.1, c.1, d.1))
+        })
+        .collect()
+}
+
+/// A metric machine thread from `x0` to the tip at 292, axis at y = 50:
+/// 60° flanks, the lower teeth half a pitch on, slanted lines for the turns
+/// of the helix, and a chamfered end.
+fn machine_thread(c: &mut Canvas, w: &W, x0: f32) {
+    const RO: f32 = 17.0;
+    const RI: f32 = 12.0;
+    const PITCH: f32 = 9.0;
+    const END: f32 = 284.0;
+    const TIP: f32 = 292.0;
+    let edge = |offset: f32, sign: f32| {
+        let mut pts = vec![(x0, 50.0 + sign * RI)];
+        let mut x = x0 + offset;
+        while x + PITCH / 2.0 <= END {
+            pts.push((x, 50.0 + sign * RI));
+            pts.push((x + PITCH / 2.0, 50.0 + sign * RO));
+            x += PITCH;
+        }
+        pts.push((END, 50.0 + sign * RI));
+        pts
+    };
+    let mut pts = edge(1.0, -1.0);
+    pts.extend([(TIP, 50.0 - RI + 3.0), (TIP, 50.0 + RI - 3.0)]);
+    let mut bottom = edge(1.0 + PITCH / 2.0, 1.0);
+    bottom.reverse();
+    pts.extend(bottom);
+    w.fill(c, &pts, 1.0);
+    // The thread's turns: slanted lines from each upper crest to the lower
+    // crest half a pitch on.
+    let mut x = x0 + 1.0 + PITCH / 2.0;
+    while x + PITCH <= END {
+        c.line(w.p(x, 50.0 - RI + 0.5), w.p(x + PITCH / 2.0, 50.0 + RI - 0.5), w.s(2.0), 0.0);
+        x += PITCH;
+    }
+}
+
+/// The four everyday screws, top view and side view (wide pictograms after
+/// the user's own drawings).
+pub const SCREWS: &[Picto] = &[
+    picto!(64, "Senkkopf Innensechskant (mit Draufsicht)", 3.0, |c, u| {
+        let w = W(u);
+        w.disc(c, 50.0, 50.0, 40.0, 1.0);
+        w.hex(c, 50.0, 50.0, 17.0, 0.0);
+        w.fill(c, &[(104.0, 8.0), (110.0, 8.0), (135.0, 33.0), (135.0, 67.0), (110.0, 92.0), (104.0, 92.0)], 1.0);
+        machine_thread(c, &w, 134.0);
+    }),
+    picto!(65, "Zylinderkopf Innensechskant (mit Draufsicht)", 3.0, |c, u| {
+        let w = W(u);
+        w.disc(c, 50.0, 50.0, 38.0, 1.0);
+        w.hex(c, 50.0, 50.0, 17.0, 0.0);
+        c.fill(&rounded_rect(Rect::new(w.p(108.0, 16.0).0, w.p(108.0, 16.0).1, w.p(146.0, 84.0).0, w.p(146.0, 84.0).1), w.s(4.0)), 1.0);
+        machine_thread(c, &w, 145.0);
+    }),
+    picto!(66, "Linsenkopf Innensechskant (mit Draufsicht)", 3.0, |c, u| {
+        let w = W(u);
+        w.disc(c, 50.0, 50.0, 40.0, 1.0);
+        w.ring(c, 50.0, 50.0, 30.0, 2.5, 0.0);
+        w.hex(c, 50.0, 50.0, 14.0, 0.0);
+        let mut side = vec![(142.0, 8.0), (142.0, 92.0), (134.0, 92.0)];
+        side.extend(bezier((134.0, 92.0), (112.0, 92.0), (102.0, 72.0), (102.0, 50.0)));
+        side.extend(bezier((102.0, 50.0), (102.0, 28.0), (112.0, 8.0), (134.0, 8.0)));
+        w.fill(c, &side, 1.0);
+        machine_thread(c, &w, 141.0);
+    }),
+    picto!(67, "Sechskantschraube (mit Draufsicht)", 3.0, |c, u| {
+        let w = W(u);
+        w.hex(c, 50.0, 50.0, 42.0, 1.0);
+        w.ring(c, 50.0, 50.0, 33.0, 3.0, 0.0);
+        w.fill(c, &[(112.0, 10.0), (140.0, 10.0), (140.0, 90.0), (112.0, 90.0), (108.0, 82.0), (108.0, 18.0)], 1.0);
+        w.rect(c, 108.0, 30.0, 32.0, 2.5, 0.0);
+        w.rect(c, 108.0, 67.5, 32.0, 2.5, 0.0);
+        machine_thread(c, &w, 139.0);
+    }),
+];
 
 /// Screw heads (all with machine thread). Code points stay stable: saved
 /// designs refer to them.
@@ -471,18 +600,24 @@ pub const FIXINGS: &[Picto] = &[
 ];
 
 pub const GROUPS: &[(&str, &[Picto])] =
-    &[("Schraubenköpfe", HEADS), ("Gewinde", THREADS), ("Antriebe", DRIVES), ("Muttern & Zubehör", FIXINGS)];
+    &[("Schrauben", SCREWS), ("Schraubenköpfe", HEADS), ("Gewinde", THREADS), ("Antriebe", DRIVES), ("Muttern & Zubehör", FIXINGS)];
 
 pub fn find(ch: char) -> Option<&'static Picto> {
     GROUPS.iter().flat_map(|(_, g)| g.iter()).find(|p| p.ch == ch)
 }
 
-/// Draw pictogram `ch` into the square centred in `r`. Returns false if
-/// `ch` is not one of ours.
+/// Draw pictogram `ch` into the largest box of its aspect ratio centred in
+/// `r`. Returns false if `ch` is not one of ours.
 pub fn draw(c: &mut Canvas, ch: char, r: Rect) -> bool {
     let Some(p) = find(ch) else { return false };
-    let side = r.w().min(r.h());
-    let (x0, y0) = (r.x0 + (r.w() - side) / 2.0, r.y0 + (r.h() - side) / 2.0);
-    (p.draw)(c, &U { r: Rect::new(x0, y0, x0 + side, y0 + side) });
+    let w = r.w().min(r.h() * p.aspect);
+    let h = w / p.aspect;
+    let (x0, y0) = (r.x0 + (r.w() - w) / 2.0, r.y0 + (r.h() - h) / 2.0);
+    (p.draw)(c, &U { r: Rect::new(x0, y0, x0 + w, y0 + h) });
     true
+}
+
+/// Width / height of pictogram `ch` (1 for anything that is not ours).
+pub fn aspect(ch: char) -> f32 {
+    find(ch).map_or(1.0, |p| p.aspect)
 }
