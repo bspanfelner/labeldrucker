@@ -27,6 +27,10 @@ pub trait Link {
     fn chunk_size(&self) -> usize {
         BLE_CHUNK
     }
+    /// Drop notifications already received but not yet read: leftovers
+    /// (e.g. duplicates, which BlueZ delivers once per subscribed client)
+    /// must not pass for the answer to the next command.
+    fn discard_pending(&mut self) {}
 }
 
 /// What `probe` reports.
@@ -63,6 +67,7 @@ impl<L: Link> Printer<L> {
     }
 
     async fn write_frame(&mut self, frame: &[u8]) -> Result<()> {
+        self.link.discard_pending();
         let size = self.link.chunk_size().max(1);
         for (i, chunk) in frame.chunks(size).enumerate() {
             if i > 0 {

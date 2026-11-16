@@ -68,6 +68,9 @@ fn connect_failed(e: JsValue) -> String {
     }
 }
 
+/// Identical notifications this close together are one, delivered twice.
+const DUPLICATE_MS: f64 = 40.0;
+
 /// How often `recv` looks at the notification queue.
 const RECV_POLL_MS: i32 = 2;
 
@@ -103,7 +106,7 @@ async fn sleep_ms(ms: i32) {
 
 thread_local! {
     static DIAG: RefCell<Diag> = RefCell::new(Diag::default());
-    static WITH_RESPONSE: Cell<bool> = const { Cell::new(true) };
+    static WITH_RESPONSE: Cell<Option<bool>> = const { Cell::new(None) };
     static TRACE: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
 }
 
@@ -164,16 +167,40 @@ fn diag(f: impl FnOnce(&mut Diag)) {
     DIAG.with(|d| f(&mut d.borrow_mut()));
 }
 
-/// Write with response (ATT Write Request, the default) or the faster
-/// Write Command. iOS (Bluefy) silently drops Write Commands sent in quick
-/// succession, which leaves the printed label blank; requests are each
-/// acknowledged before the next goes out.
+/// Write with response (ATT Write Request) or the faster Write Command.
+///
+/// iOS (Bluefy) silently drops Write Commands sent in quick succession,
+/// which leaves the printed label blank, so there every write waits for its
+/// acknowledgement. Elsewhere (Chromium on Linux) that wait is slow enough
+/// that the printer gives up on a 512-byte data frame half-way and never
+/// acks it; Write Commands, as the vendor app sends them, work there.
+/// `?write=req` or `?write=cmd` in the page address overrides the choice.
 pub fn set_write_with_response(on: bool) {
-    WITH_RESPONSE.with(|w| w.set(on));
+    WITH_RESPONSE.with(|w| w.set(Some(on)));
 }
 
 pub fn write_with_response() -> bool {
-    WITH_RESPONSE.with(Cell::get)
+    WITH_RESPONSE.with(|w| {
+        let v = w.get().unwrap_or_else(default_write_with_response);
+        w.set(Some(v));
+        v
+    })
+}
+
+fn default_write_with_response() -> bool {
+    let Some(w) = web_sys::window() else { return true };
+    let param = w.location().search().ok().and_then(|q| {
+        q.trim_start_matches('?').split('&').find_map(|kv| kv.strip_prefix("write=").map(str::to_owned))
+    });
+    match param.as_deref() {
+        Some("req" | "request" | "response") => return true,
+        Some("cmd" | "command" | "noresponse") => return false,
+        _ => {}
+    }
+    let nav = w.navigator();
+    let ua = nav.user_agent().unwrap_or_default();
+    // iPadOS reports itself as a Mac; a touch screen gives it away.
+    ua.contains("iPhone") || ua.contains("iPad") || ua.contains("iPod") || (ua.contains("Macintosh") && nav.max_touch_points() > 1)
 }
 
 /// A short description of a JS value's kind, e.g. `DataView`.
@@ -314,6 +341,7 @@ impl WebLink {
         let q = queue.clone();
         let source = notify.clone();
         let last = RefCell::new(JsValue::UNDEFINED);
+        let last_value = RefCell::new((Vec::<u8>::new(), f64::NEG_INFINITY));
         // Tolerant of how the browser delivers the value: Bluefy (iOS) is a
         // polyfill and need not match Chrome's event exactly. Never panic
         // here: a trap in an event handler would silently drop every answer.
@@ -339,6 +367,19 @@ impl WebLink {
             match v.as_ref().and_then(bytes_of) {
                 Some(b) => {
                     diag(|d| d.decoded += 1);
+                    // BlueZ hands each notification to every subscribed
+                    // client and Chromium then fires once per subscription
+                    // (e.g. a second tab connected to the printer): the same
+                    // bytes twice within milliseconds are one notification.
+                    // A genuine repeat needs a new command and a radio round
+                    // trip first.
+                    let t = now_ms();
+                    let mut lv = last_value.borrow_mut();
+                    if lv.0 == b && t - lv.1 < DUPLICATE_MS {
+                        trace(format!("N= {:3} doppelt, ignoriert", b.len()));
+                        return;
+                    }
+                    *lv = (b.clone(), t);
                     q.borrow_mut().push_back(b);
                 }
                 None => diag(|d| d.note = format!("Wert: {}", v.as_ref().map_or("keiner".into(), kind))),
@@ -473,5 +514,11 @@ impl Link for WebLink {
 
     fn chunk_size(&self) -> usize {
         chunk_size()
+    }
+
+    fn discard_pending(&mut self) {
+        for p in self.queue.borrow_mut().drain(..) {
+            trace(format!("N- {:3} {} (verworfen)", p.len(), hex(&p)));
+        }
     }
 }
