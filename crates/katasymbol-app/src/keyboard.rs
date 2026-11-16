@@ -78,8 +78,12 @@ mod web {
             let used = used.borrow();
             FIELDS.with(|f| {
                 for (key, field) in f.borrow().iter() {
+                    // A field no longer shown at all also gives up the keyboard.
                     if !used.contains(key) {
                         hide(&field.el);
+                        if is_focused(&field.el) {
+                            let _ = field.el.blur();
+                        }
                     }
                 }
             });
@@ -88,9 +92,6 @@ mod web {
 
     fn hide(el: &web_sys::HtmlElement) {
         let _ = el.style().set_property("display", "none");
-        if is_focused(el) {
-            let _ = el.blur();
-        }
     }
 
     fn is_focused(el: &web_sys::HtmlElement) -> bool {
@@ -216,7 +217,14 @@ mod web {
 
         let rect = response.rect;
         let popup = egui::Popup::is_any_open(&ctx);
-        let visible = clip.contains_rect(rect) && !popup;
+        let focused = FIELDS.with(|f| f.borrow().get(key).is_some_and(|field| is_focused(&field.el)));
+        // While typing, never hide the field (that would close the keyboard):
+        // when the keyboard shrinks the window, scroll the field into view.
+        if focused && !clip.contains_rect(rect) {
+            response.scroll_to_me(Some(egui::Align::Center));
+            ctx.request_repaint();
+        }
+        let visible = focused || (clip.contains_rect(rect) && !popup);
         FIELDS.with(|f| {
             let mut f = f.borrow_mut();
             let Some(field) = f.get_mut(key) else { return };
