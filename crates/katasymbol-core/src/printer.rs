@@ -127,10 +127,12 @@ impl<L: Link> Printer<L> {
         let density = density.clamp(1, 7);
         let EncodedPage { buffers, paper_back } = encode_page(page, density)?;
 
-        // Density as the vendor maps it: ((d - 1) / 10 + 0.8) * 100.
-        let value = 80 + u16::from(density - 1) * 10;
-        self.command(&density_frame(value)).await?;
-        self.command(&cmd_frame(CMD_CHECK_DEVICE, 0)).await?;
+        // The order of the vendor app (iOS capture): wait for an idle
+        // printer, set the density, start the job, wait until the printer
+        // reports printing, and only then announce the label (PAPER_BACK).
+        // Sending PAPER_BACK right after START_PRINT (and a CHECK_DEVICE,
+        // which the vendor app never sends) made the printer abort the job
+        // under Chromium/BlueZ, whose answers come faster than iOS's.
 
         // Wait (up to 6 s) for an idle printer, stopping a leftover job.
         let mut idle = false;
@@ -139,7 +141,7 @@ impl<L: Link> Printer<L> {
             if s.printing {
                 self.command(&cmd_frame(CMD_STOP_PRINT, 0)).await?;
             }
-            if !s.busy {
+            if !s.busy && !s.printing {
                 idle = true;
                 break;
             }
@@ -149,7 +151,27 @@ impl<L: Link> Printer<L> {
             return Err(Error::Timeout("printer to become idle"));
         }
 
+        // Density as the vendor maps it: ((d - 1) / 10 + 0.8) * 100.
+        let value = 80 + u16::from(density - 1) * 10;
+        self.command(&density_frame(value)).await?;
         self.command(&cmd_frame(CMD_START_PRINT, 0)).await?;
+
+        // Wait (up to 3 s) for the job to run; the vendor app saw it on the
+        // first poll. A printer that is neither busy nor printing dropped it.
+        let mut idle_polls = 0;
+        for _ in 0..30 {
+            let s = self.checked_status().await?;
+            if s.printing {
+                break;
+            }
+            if !s.busy {
+                idle_polls += 1;
+                if idle_polls >= 3 {
+                    return Err(Error::Printer("printer did not start the job".into()));
+                }
+            }
+            self.link.sleep(POLL).await;
+        }
         self.command(&cmd_frame(CMD_PAPER_BACK, paper_back)).await?;
 
         let of = buffers.len();
