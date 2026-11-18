@@ -262,8 +262,8 @@ impl Canvas {
 
     /// Threshold at 50 % into a printable page (rows beyond the head are cut).
     pub fn to_page(&self) -> Page {
-        let mut page = Page::blank_dots(self.width);
-        for y in 0..self.height.min(HEAD_DOTS) {
+        let mut page = Page::blank_sized(self.width, self.height);
+        for y in 0..page.height() {
             for x in 0..self.width {
                 if self.get(x, y) >= 0.5 {
                     page.set(x, y);

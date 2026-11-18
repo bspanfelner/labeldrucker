@@ -113,6 +113,9 @@ struct State<T: Transport> {
 impl<T: Transport> State<T> {
     fn handle(&mut self, cmd: Cmd, send: &dyn Fn(Ev)) {
         match cmd {
+            Cmd::Scan { kind: super::Kind::Brother, .. } => {
+                send(Ev::Error("Der Brother-Drucker geht bisher nur in der Web-App (Chrome oder Edge am Computer).".into()));
+            }
             Cmd::Scan { .. } => {
                 send(Ev::Progress("Suche Drucker (8 s) …".into()));
                 match self.transport.scan(8) {
@@ -124,11 +127,11 @@ impl<T: Transport> State<T> {
                 self.conn = None;
                 send(Ev::Connected(false));
             }
-            Cmd::Probe { addr } => match self.with_printer(&addr, send, |t, p| t.block_on(p.probe())) {
-                Ok(info) => send(Ev::Info(info)),
+            Cmd::Probe { addr, .. } => match self.with_printer(&addr, send, |t, p| t.block_on(p.probe())) {
+                Ok(info) => send(Ev::Info(info.into())),
                 Err(e) => send(Ev::Error(e)),
             },
-            Cmd::Print { addr, page, density, copies } => {
+            Cmd::Print { addr, page, density, copies, .. } => {
                 let copies = copies.max(1);
                 let mut r = Ok(());
                 for n in 1..=copies {
@@ -145,7 +148,7 @@ impl<T: Transport> State<T> {
                         send(Ev::Printed);
                         // Refresh the label counter and status.
                         if let Ok(info) = self.with_printer(&addr, send, |t, p| t.block_on(p.probe())) {
-                            send(Ev::Info(info));
+                            send(Ev::Info(info.into()));
                         }
                     }
                     Err(e) => send(Ev::Error(e)),

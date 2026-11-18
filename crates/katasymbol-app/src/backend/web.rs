@@ -5,10 +5,15 @@
 //! connects; later commands use that connection. The chosen device is
 //! remembered: when the printer drops the connection (it powers off when
 //! idle), the next command reconnects without the chooser.
+//!
+//! The Brother P-touch goes through Web Serial instead (Bluetooth RFCOMM to
+//! a printer paired in the operating system), with the same pattern: the
+//! port picked once is reopened for later jobs.
 
-use super::{Cmd, Ev, progress_text};
+use super::{Cmd, Ev, Kind, progress_text};
+use katasymbol_core::brother::{self, JobOptions, PtPrinter};
 use katasymbol_core::{Error, Printer};
-use katasymbol_web::{BluetoothDevice, WebLink};
+use katasymbol_web::{BluetoothDevice, SerialLink, SerialPort, WebLink};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -18,6 +23,9 @@ struct State {
     printer: Option<Printer<WebLink>>,
     /// The device picked in the chooser, until the user disconnects.
     device: Option<BluetoothDevice>,
+    /// Brother: the open connection and the port picked in the chooser.
+    pt: Option<PtPrinter<SerialLink>>,
+    port: Option<SerialPort>,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -53,7 +61,29 @@ impl Worker {
 
 async fn handle(cmd: Cmd, shared: Shared, send: &Send) {
     match cmd {
-        Cmd::Scan { all } => {
+        Cmd::Scan { kind: Kind::Brother, .. } => {
+            forget(&shared);
+            send(Ev::Progress("Brother-Drucker im Browser-Dialog wählen …".into()));
+            match SerialLink::request().await {
+                Ok(link) => {
+                    send(Ev::Device { addr: "brother".into(), name: "Brother P-touch".into() });
+                    watch_pt(&link, send);
+                    shared.borrow_mut().port = Some(link.port());
+                    send(Ev::Connected(true));
+                    let mut p = PtPrinter::new(link);
+                    let r = p.status().await;
+                    shared.borrow_mut().pt = Some(p);
+                    match r {
+                        Ok(st) => send(Ev::Info(st.into())),
+                        Err(e) => send(Ev::Error(format!("{e} – ist der Drucker eingeschaltet?"))),
+                    }
+                }
+                Err(e) => send(Ev::Error(format!(
+                    "Keine Verbindung: {e}. Der Drucker muss vorher in den Bluetooth-Einstellungen des Computers gekoppelt sein."
+                ))),
+            }
+        }
+        Cmd::Scan { all, .. } => {
             forget(&shared);
             send(Ev::Progress("Drucker im Browser-Dialog wählen …".into()));
             match WebLink::request(all).await {
@@ -77,7 +107,7 @@ async fn handle(cmd: Cmd, shared: Shared, send: &Send) {
                     }
                     shared.borrow_mut().printer = Some(p);
                     match r {
-                        Ok(info) => send(Ev::Info(info)),
+                        Ok(info) => send(Ev::Info(info.into())),
                         Err(e) => send(Ev::Error(diagnose(&e))),
                     }
                 }
@@ -94,8 +124,31 @@ async fn handle(cmd: Cmd, shared: Shared, send: &Send) {
             forget(&shared);
             send(Ev::Connected(false));
         }
+        Cmd::Probe { kind: Kind::Brother, .. } => match with_pt(&shared, send, None).await {
+            Ok(st) => send(Ev::Info(st.into())),
+            Err(e) => send(Ev::Error(e)),
+        },
+        Cmd::Print { kind: Kind::Brother, page, copies, .. } => {
+            katasymbol_web::trace(format!("== Brother-Druck: {} × {} Punkte, {copies}×", page.width(), page.height()));
+            let copies = copies.max(1);
+            let mut r = Ok(brother::Status::default());
+            for n in 1..=copies {
+                let prefix = if copies > 1 { format!("Kopie {n}/{copies}: ") } else { String::new() };
+                r = with_pt(&shared, send, Some((&page, &prefix))).await;
+                if r.is_err() {
+                    break;
+                }
+            }
+            match r {
+                Ok(st) => {
+                    send(Ev::Printed);
+                    send(Ev::Info(st.into()));
+                }
+                Err(e) => send(Ev::Error(e)),
+            }
+        }
         Cmd::Probe { .. } => match with_printer(&shared, send, Job::Probe).await {
-            Ok(Done::Info(info)) => send(Ev::Info(info)),
+            Ok(Done::Info(info)) => send(Ev::Info(info.into())),
             Ok(Done::Printed) => {}
             Err(e) => send(Ev::Error(e)),
         },
@@ -117,7 +170,7 @@ async fn handle(cmd: Cmd, shared: Shared, send: &Send) {
                     // the printer finishes; that is fine).
                     let quiet: Send = Rc::new(|_| {});
                     if let Ok(Done::Info(info)) = with_printer(&shared, &quiet, Job::Probe).await {
-                        send(Ev::Info(info));
+                        send(Ev::Info(info.into()));
                     }
                 }
                 Err(e) => send(Ev::Error(e)),
@@ -209,6 +262,69 @@ fn forget(shared: &Shared) {
         p.into_link().disconnect();
     }
     st.device = None;
+    if let Some(p) = st.pt.take() {
+        wasm_bindgen_futures::spawn_local(p.into_stream().close());
+    }
+    st.port = None;
+}
+
+/// Report it to the UI when the Brother connection ends.
+fn watch_pt(link: &SerialLink, send: &Send) {
+    let send = send.clone();
+    link.on_lost(move || send(Ev::Connected(false)));
+}
+
+/// Brother: ask for the status (`job` None) or print a page, reopening the
+/// remembered port if the connection was closed; after a link error on an
+/// older connection, reopen once and retry.
+async fn with_pt(shared: &Shared, send: &Send, job: Option<(&katasymbol_core::Page, &str)>) -> Result<brother::Status, String> {
+    async fn run(p: &mut PtPrinter<SerialLink>, job: Option<(&katasymbol_core::Page, &str)>, send: &Send) -> katasymbol_core::Result<brother::Status> {
+        match job {
+            None => p.status().await,
+            Some((page, prefix)) => p.print(page, JobOptions::default(), |pr| send(Ev::Progress(progress_text(prefix, pr)))).await,
+        }
+    }
+    let existing = shared.borrow_mut().pt.take().filter(|p| p.stream().is_connected());
+    let fresh = existing.is_none();
+    let mut p = match existing {
+        Some(p) => p,
+        None => reopen(shared, send).await?,
+    };
+    let mut r = run(&mut p, job, send).await;
+    if matches!(r, Err(Error::Link(_))) && !fresh {
+        p.into_stream().close().await;
+        p = reopen(shared, send).await?;
+        r = run(&mut p, job, send).await;
+    }
+    let link_lost = matches!(r, Err(Error::Link(_)));
+    if link_lost {
+        p.into_stream().close().await;
+        send(Ev::Connected(false));
+    } else {
+        shared.borrow_mut().pt = Some(p);
+    }
+    r.map_err(|e| e.to_string())
+}
+
+async fn reopen(shared: &Shared, send: &Send) -> Result<PtPrinter<SerialLink>, String> {
+    let port = shared.borrow().port.clone();
+    let port = match port {
+        Some(p) => p,
+        None => SerialLink::remembered().await.ok_or_else(|| "Nicht verbunden – erst „Verbinden“ klicken.".to_string())?,
+    };
+    send(Ev::Progress("Verbinde erneut mit dem Brother-Drucker …".into()));
+    match SerialLink::open(port.clone()).await {
+        Ok(link) => {
+            watch_pt(&link, send);
+            shared.borrow_mut().port = Some(port);
+            send(Ev::Connected(true));
+            Ok(PtPrinter::new(link))
+        }
+        Err(e) => {
+            send(Ev::Connected(false));
+            Err(format!("Brother-Drucker nicht erreichbar – ist er eingeschaltet? ({e})"))
+        }
+    }
 }
 
 /// The error text, with how many answers the printer sent so far: tells a

@@ -42,6 +42,9 @@ pub struct Label {
     pub invert: bool,
     /// Blank space at the start and end of the label (the cut edges), dots.
     pub end_margin: f32,
+    /// Dots across the printed band: the printer's, not part of the design.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub height: usize,
 }
 
 impl Default for Label {
@@ -58,6 +61,7 @@ impl Default for Label {
             frame: Frame::default(),
             invert: false,
             end_margin: DEFAULT_END_MARGIN,
+            height: HEAD_DOTS,
         }
     }
 }
@@ -73,6 +77,11 @@ struct Layout {
 }
 
 impl Label {
+    /// The band height in dots (a deserialized label has none: E16's).
+    fn band(&self) -> usize {
+        if self.height == 0 { HEAD_DOTS } else { self.height.min(crate::page::MAX_DOTS) }
+    }
+
     fn icon_gap(&self) -> f32 {
         self.frame.padding.max(4.0) * if self.separator { 2.0 } else { 1.0 }
     }
@@ -123,11 +132,11 @@ impl Label {
     /// The part of a label `width` dots long inside the end margins.
     fn area(&self, width: usize) -> Rect {
         let m = self.end_margin.clamp(0.0, width as f32 / 4.0);
-        Rect::new(m, 0.0, width as f32 - m, HEAD_DOTS as f32)
+        Rect::new(m, 0.0, width as f32 - m, self.band() as f32)
     }
 
     pub fn canvas(&self, font: &impl Font, icons: &impl Font, picture: Option<&Picture>) -> Canvas {
-        let mut c = Canvas::for_page(self.length.max(8));
+        let mut c = Canvas::new(self.length.max(8), self.band());
         let area = self.area(c.width);
         let content = self.frame.draw(&mut c, area, icons);
         let l = self.layout(content);
@@ -162,8 +171,8 @@ impl Label {
     pub fn natural_length(&self, font: &impl Font, icons: &impl Font, picture: Option<&Picture>) -> usize {
         // The frame's horizontal overhead does not depend on the length.
         const PROBE: usize = 2000;
-        let mut probe = Canvas::for_page(PROBE);
-        let area = Rect::new(self.end_margin, 0.0, PROBE as f32 - self.end_margin, HEAD_DOTS as f32);
+        let mut probe = Canvas::new(PROBE, self.band());
+        let area = Rect::new(self.end_margin, 0.0, PROBE as f32 - self.end_margin, self.band() as f32);
         let content = self.frame.draw(&mut probe, area, icons);
         let l = self.layout(content);
         let overhead = PROBE as f32 - l.body.w();
@@ -176,7 +185,7 @@ impl Label {
                 text::measure(font, &self.text, size).0
             }
         };
-        (overhead + body + 2.0).ceil().max(HEAD_DOTS as f32 / 2.0) as usize
+        (overhead + body + 2.0).ceil().max(self.band() as f32 / 2.0) as usize
     }
 }
 

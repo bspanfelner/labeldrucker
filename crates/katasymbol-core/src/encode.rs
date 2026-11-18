@@ -51,6 +51,9 @@ pub fn compress(data: &[u8]) -> Result<Vec<u8>> {
 /// Encode one page (the job's only/last page) at `density` (1-7).
 pub fn encode_page(page: &Page, density: u8) -> Result<EncodedPage> {
     let cols = page.columns();
+    if page.height() != crate::page::HEAD_DOTS {
+        return Err(Error::Encode(format!("E16 pages are {} dots high, not {}", crate::page::HEAD_DOTS, page.height())));
+    }
     if cols.is_empty() {
         return Err(Error::Encode("empty page".into()));
     }
@@ -65,7 +68,7 @@ pub fn encode_page(page: &Page, density: u8) -> Result<EncodedPage> {
         let last = pos + n >= cols.len();
         let mut buf = vec![0u8; BUF_LEN];
         for (i, col) in cols[pos..pos + n].iter().enumerate() {
-            buf[HDR + i * BYTES_PER_COL..HDR + (i + 1) * BYTES_PER_COL].copy_from_slice(col);
+            buf[HDR + i * BYTES_PER_COL..HDR + (i + 1) * BYTES_PER_COL].copy_from_slice(&col[..BYTES_PER_COL]);
         }
         buf[2..4].copy_from_slice(&page_reg(first, last, density));
         buf[4..6].copy_from_slice(&(n as u16).to_le_bytes());

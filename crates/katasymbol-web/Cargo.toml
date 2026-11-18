@@ -15,5 +15,5 @@ web-sys = { version = "0.3", features = [
     "Window", "Navigator", "Performance", "Event", "EventTarget",
     "Bluetooth", "BluetoothDevice", "BluetoothLeScanFilterInit", "BluetoothRemoteGattServer",
     "BluetoothRemoteGattService", "BluetoothRemoteGattCharacteristic",
-    "RequestDeviceOptions", "console",
+    "RequestDeviceOptions", "console", "Location",
 ] }

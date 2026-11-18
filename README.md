@@ -1,7 +1,8 @@
 # Katasymbol
 
 Rust software for the Katasymbol (Supvan) **E16** label printer over Bluetooth Low Energy.
-Targets: Linux, macOS, iOS and Web.
+Targets: Linux, macOS, iOS and Web. The web app also prints on the **Brother
+P-touch PT-P710BT** (CUBE Plus) over Bluetooth Classic — see below.
 
 ## Platforms
 
@@ -38,6 +39,21 @@ busctl set-property org.bluez /org/bluez/hci0/dev_A4_93_40_3E_7B_0C org.bluez.De
 Without any classic Bluetooth devices, `ControllerMode = le` in the same file does
 it too (for all devices).
 
+### Brother PT-P710BT (web app, Chrome/Edge on a computer)
+
+The PT-P710BT talks Bluetooth Classic (serial port profile), not Bluetooth LE.
+Browsers reach it through Web Serial (Chrome/Edge 117+ on the desktop); Safari,
+Firefox and iOS cannot (on iPhones the printer needs Apple's MFi licence).
+
+1. Pair the printer in the computer's Bluetooth settings once (Linux:
+   `bluetoothctl`, then `scan on`, `pair <address>`, `trust <address>`).
+2. In the app: **Verbinden → Brother PT-P710BT**, pick the printer's serial port.
+3. The app reads the tape cassette (width, colours) and lays the label out for
+   its print area: 180 dpi, 24–128 dots across depending on the tape (3.5–24 mm).
+
+The Brother raster protocol lives in `katasymbol-core::brother`, the Web Serial
+link in `katasymbol-web::serial`.
+
 `.github/workflows/build.yml` builds Linux, macOS and web on GitHub (manually or on a
 `v*` tag), attaches them to a release and publishes the web app on GitHub Pages.
 
@@ -45,10 +61,10 @@ it too (for all devices).
 
 | Crate | Purpose |
 |------|-------|
-| `katasymbol-core` | protocol, page bitmap, LZMA, label layout (text, pictograms, 45 frames), print flow — platform independent, builds for WASM and iOS |
+| `katasymbol-core` | protocol, page bitmap, LZMA, label layout (text, pictograms, 45 frames), print flow — platform independent, builds for WASM and iOS; `brother`: Brother PT raster protocol |
 | `katasymbol-linux` | BLE link via a raw LE L2CAP ATT socket |
 | `katasymbol-btle` | BLE link via btleplug (macOS, Windows) |
-| `katasymbol-web` | BLE link via Web Bluetooth |
+| `katasymbol-web` | BLE link via Web Bluetooth; Brother link via Web Serial (Bluetooth RFCOMM) |
 | `katasymbol-app` | the app (desktop binary + library for the web build) |
 | `katasymbol-webapp` | WebAssembly entry point |
 | `katasymbol-cli` | `katasymbol probe | test | image` (Linux) |

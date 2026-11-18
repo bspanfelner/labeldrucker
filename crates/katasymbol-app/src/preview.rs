@@ -4,10 +4,10 @@
 use crate::style::*;
 use crate::{App, MAX_MM, MIN_MM, Mode};
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, pos2, vec2};
-use katasymbol_core::page::HEAD_DOTS;
+use crate::backend::Kind;
+use katasymbol_core::brother;
 
 const PRESETS: [f32; 7] = [20.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0];
-const PRINT_BAND_MM: f32 = 12.0;
 
 impl App {
     pub fn preview(&mut self, ui: &mut egui::Ui) {
@@ -63,6 +63,20 @@ impl App {
                 }
             }
         });
+        if self.kind == Kind::Brother {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("{I_TAG}  Band")).strong());
+                let known = self.info.as_ref().and_then(|i| i.tape).is_some_and(|t| t.media_width > 0) && self.connected;
+                for w in brother::TAPE_WIDTHS {
+                    let text = if w == 4 { "3,5".to_string() } else { w.to_string() };
+                    let b = egui::Button::new(format!("{text} mm")).selected(self.brother_tape == w);
+                    let r = ui.add_enabled(!known || self.brother_tape == w, b);
+                    if r.on_hover_text(if known { "Breite der eingelegten Bandkassette" } else { "Bandbreite (wird beim Verbinden erkannt)" }).clicked() {
+                        self.brother_tape = w;
+                    }
+                }
+            });
+        }
         if !test {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("{I_CUT}  Schnittrand")).strong());
@@ -81,9 +95,12 @@ impl App {
 
     fn label_view(&mut self, ui: &mut egui::Ui) {
         let Some(tex) = self.preview.clone() else { return };
+        let media = self.media();
         let page_w = self.page.as_ref().map_or(self.design.label.length, |p| p.width());
-        let len_mm = page_w as f32 / 8.0;
-        let label_w_mm = self.material_width();
+        let page_h = self.page.as_ref().map_or(media.band, |p| p.height());
+        let len_mm = page_w as f32 / media.dpmm;
+        let label_w_mm = media.width_mm;
+        let band_mm = page_h as f32 / media.dpmm;
         let avail = ui.available_size();
 
         // Pixels per mm: fit the width, keep the height reasonable; frozen while dragging.
@@ -105,10 +122,10 @@ impl App {
         p.rect_filled(label.translate(vec2(0.0, 2.0)), corner, Color32::from_black_alpha(40));
         p.rect_filled(label, corner, Color32::WHITE);
 
-        // The printable 12 mm band, with the bitmap.
-        let band = Rect::from_center_size(label.center(), vec2(label.width(), PRINT_BAND_MM * scale));
+        // The printable band, with the bitmap.
+        let band = Rect::from_center_size(label.center(), vec2(label.width(), band_mm * scale));
         p.image(tex.id(), band, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-        if label_w_mm > PRINT_BAND_MM + 0.5 {
+        if label_w_mm > band_mm + 0.5 {
             let guide = Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(47, 111, 235, 60));
             for y in [band.min.y, band.max.y] {
                 p.line_segment([pos2(label.min.x + 4.0, y), pos2(label.max.x - 4.0, y)], guide);
@@ -151,7 +168,13 @@ impl App {
         p.text(
             pos2(label.min.x, label.max.y + 48.0),
             egui::Align2::LEFT_TOP,
-            format!("Druckbild {page_w} × {HEAD_DOTS} Punkte (8 Punkte/mm). Bedruckbar sind die mittleren 12 mm."),
+            match self.kind {
+                Kind::E16 => format!("Druckbild {page_w} × {page_h} Punkte (8 Punkte/mm). Bedruckbar sind die mittleren 12 mm."),
+                Kind::Brother => format!(
+                    "Druckbild {page_w} × {page_h} Punkte (180 dpi). Bedruckbar sind die mittleren {} mm des Bands.",
+                    format!("{band_mm:.1}").replace('.', ",")
+                ),
+            },
             egui::FontId::proportional(11.5),
             v.weak_text_color(),
         );
@@ -161,7 +184,7 @@ impl App {
         let y = label.max.y + 12.0;
         let color = v.weak_text_color();
         let every = if scale < 4.0 { 20 } else { 10 };
-        for mm in 0..=len_mm.floor() as i32 {
+        for mm in 0..=(len_mm + 0.1).floor() as i32 {
             let x = label.min.x + mm as f32 * scale;
             let h = if mm % 10 == 0 { 9.0 } else if mm % 5 == 0 { 6.0 } else if scale >= 4.0 { 3.0 } else { continue };
             p.line_segment([pos2(x, y), pos2(x, y + h)], Stroke::new(1.0_f32, color));

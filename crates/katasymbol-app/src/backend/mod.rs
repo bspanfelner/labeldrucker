@@ -8,7 +8,8 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use katasymbol_core::Page;
-use katasymbol_core::printer::Info;
+use katasymbol_core::brother;
+use serde::{Deserialize, Serialize};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -34,15 +35,89 @@ pub fn link_trace() -> String {
 /// Whether the user picks the printer in a browser dialog (no address/scan list).
 pub const BROWSER_CHOOSER: bool = cfg!(target_arch = "wasm32");
 
+/// Which printer model the app drives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Kind {
+    /// Katasymbol/Supvan E16 (Bluetooth LE).
+    #[default]
+    E16,
+    /// Brother P-touch PT-P710BT and its 128-pin siblings (Bluetooth Classic).
+    Brother,
+}
+
+impl Kind {
+    pub fn title(self) -> &'static str {
+        match self {
+            Kind::E16 => "Katasymbol E16",
+            Kind::Brother => "Brother PT-P710BT",
+        }
+    }
+}
+
+/// What the printer reported, for either model.
+#[derive(Clone, Debug)]
+pub struct Info {
+    pub name: Option<String>,
+    /// A problem that stops printing.
+    pub error: Option<String>,
+    /// Width of the loaded labels or tape, mm.
+    pub width_mm: Option<f32>,
+    /// Length of die-cut labels, mm (none for continuous tape).
+    pub length_mm: Option<f32>,
+    /// Labels left (E16's counter).
+    pub counter: Option<u32>,
+    /// Brother: the full status (tape width code, colours).
+    pub tape: Option<brother::Status>,
+}
+
+impl From<katasymbol_core::printer::Info> for Info {
+    fn from(i: katasymbol_core::printer::Info) -> Self {
+        let m = i.material.as_ref();
+        Self {
+            name: i.name.clone(),
+            error: i.status.error().map(str::to_owned),
+            width_mm: m.map(|m| f32::from(m.width_mm)).filter(|w| *w >= 12.0),
+            length_mm: m.map(|m| f32::from(m.length_mm)).filter(|l| *l > 0.0),
+            counter: m.and_then(|m| m.remaining),
+            tape: None,
+        }
+    }
+}
+
+impl From<brother::Status> for Info {
+    fn from(s: brother::Status) -> Self {
+        Self {
+            name: Some("Brother P-touch".into()),
+            error: s.error().map(str::to_owned),
+            width_mm: (s.media_width > 0).then(|| brother::tape_mm(s.media_width)),
+            length_mm: None,
+            counter: None,
+            tape: Some(s),
+        }
+    }
+}
+
 pub enum Cmd {
     /// Find printers (native) or open the device chooser and connect (web).
     /// `all`: the browser's chooser lists every device, not just printers.
     Scan {
         #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
         all: bool,
+        kind: Kind,
     },
-    Probe { addr: String },
-    Print { addr: String, page: Page, density: u8, copies: u32 },
+    Probe {
+        addr: String,
+        #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+        kind: Kind,
+    },
+    Print {
+        addr: String,
+        page: Page,
+        density: u8,
+        copies: u32,
+        #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+        kind: Kind,
+    },
     Disconnect,
 }
 

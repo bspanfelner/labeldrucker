@@ -1,4 +1,5 @@
-//! Browser [`Link`] over Web Bluetooth.
+//! Browser links: [`WebLink`] (Web Bluetooth, Katasymbol E16) and
+//! [`SerialLink`] (Web Serial over Bluetooth RFCOMM, Brother P-touch).
 //!
 //! Web Bluetooth needs a secure context (`https://` or `http://localhost`) and
 //! Chrome/Edge (desktop or Android). Safari and Firefox do not implement it; on
@@ -14,6 +15,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 pub use web_sys::BluetoothDevice;
 use web_sys::{BluetoothRemoteGattCharacteristic, RequestDeviceOptions};
+
+pub mod serial;
+pub use serial::{SerialLink, SerialPort};
 
 /// The Supvan service; `ffe1`/`ffe9` live under it with Bluetooth-base UUIDs.
 pub const SERVICE: &str = "0000e0ff-3c17-d293-8e48-14fe2e4da212";

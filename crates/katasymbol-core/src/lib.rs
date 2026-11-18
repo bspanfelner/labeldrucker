@@ -13,6 +13,7 @@
 //! No async runtime is required: the [`Link`] implementation supplies I/O and
 //! sleeping, so the same code runs natively and in the browser.
 
+pub mod brother;
 pub mod encode;
 pub mod page;
 pub mod printer;

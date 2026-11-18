@@ -1,5 +1,6 @@
 //! Katasymbol app: design a label (text or image, pictograms, frame),
-//! preview it at print resolution and print it on an E16 over BLE.
+//! preview it at print resolution and print it on a Katasymbol E16 (BLE)
+//! or, in the browser, a Brother P-touch PT-P710BT (Bluetooth serial).
 //! Runs natively (Linux, macOS, Windows) and in the browser (WebAssembly).
 
 mod backend;
@@ -12,7 +13,6 @@ mod style;
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
 use katasymbol_core::label::{Label, Picture};
 use katasymbol_core::page::{DOTS_PER_MM, HEAD_DOTS};
-use katasymbol_core::printer::Info;
 use katasymbol_core::text::{FontRef, FontVec};
 use katasymbol_core::{Page, icons};
 use render::Fonts;
@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use style::*;
-use backend::{BROWSER_CHOOSER, Cmd, Ev, Found, Worker};
+use backend::{BROWSER_CHOOSER, Cmd, Ev, Found, Info, Kind, Worker};
+use katasymbol_core::brother;
 
 /// Shown in the top bar: the build (commit and time, set by the build
 /// scripts in `KATASYMBOL_BUILD`), else the crate version.
@@ -115,6 +116,24 @@ impl Design {
     pub fn set_length_mm(&mut self, mm: f32) {
         self.label.length = (mm.clamp(MIN_MM, MAX_MM).round() as usize) * DOTS_PER_MM;
     }
+
+    /// The label as printed on `media`: the design is kept in E16 dots
+    /// (8 per mm); another resolution scales lengths and sizes.
+    pub fn label_for(&self, media: Media) -> Label {
+        let mut label = self.label.clone();
+        label.height = media.band;
+        let f = media.dpmm / DOTS_PER_MM as f32;
+        if (f - 1.0).abs() > 1e-3 {
+            label.length = (self.length_mm() * media.dpmm).round() as usize;
+            label.end_margin *= f;
+            label.size_px = label.size_px.map(|s| s * f);
+            label.frame.thickness = (label.frame.thickness * f).max(1.0);
+            label.frame.margin *= f;
+            label.frame.radius *= f;
+            label.frame.padding *= f;
+        }
+        label
+    }
 }
 
 pub const MIN_MM: f32 = 10.0;
@@ -130,11 +149,32 @@ struct Saved {
     addr: String,
     density: u8,
     copies: u32,
+    kind: Kind,
+    /// Width code of the Brother tape last seen (12 = 12 mm).
+    brother_tape: u8,
 }
 
 impl Default for Saved {
     fn default() -> Self {
-        Self { design: Design::default(), addr: String::new(), density: 4, copies: 1 }
+        Self { design: Design::default(), addr: String::new(), density: 4, copies: 1, kind: Kind::E16, brother_tape: 12 }
+    }
+}
+
+/// The printed band for the current printer and labels.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Media {
+    /// Dots across the printed band.
+    pub band: usize,
+    /// Dots per mm.
+    pub dpmm: f32,
+    /// Width of the label or tape, mm.
+    pub width_mm: f32,
+}
+
+impl Media {
+    /// Height of the printable band, mm.
+    pub fn band_mm(&self) -> f32 {
+        self.band as f32 / self.dpmm
     }
 }
 
@@ -147,7 +187,7 @@ pub struct App {
     /// Bytes of an image opened in the browser (no file system there).
     image_bytes: Option<(PathBuf, Vec<u8>)>,
     pub design: Design,
-    rendered: Option<Design>,
+    rendered: Option<(Design, Media)>,
     page: Option<Page>,
     preview: Option<TextureHandle>,
     thumbs: Vec<TextureHandle>,
@@ -168,6 +208,9 @@ pub struct App {
     connected: bool,
     busy: bool,
     info: Option<Info>,
+    /// The printer model to connect to and print for.
+    pub kind: Kind,
+    brother_tape: u8,
     /// Single-column layout for phones.
     narrow: bool,
     device_name: Option<String>,
@@ -249,6 +292,8 @@ impl App {
             connected: false,
             busy: false,
             info: None,
+            kind: if BROWSER_CHOOSER { saved.kind } else { Kind::E16 },
+            brother_tape: if brother::print_area(saved.brother_tape).is_some() { saved.brother_tape } else { 12 },
             narrow: false,
             device_name: None,
             found: Vec::new(),
@@ -290,26 +335,35 @@ impl App {
 
     /// The material's label length in mm, if the printer reported one.
     pub fn material_length(&self) -> Option<f32> {
-        self.info.as_ref()?.material.as_ref().map(|m| f32::from(m.length_mm)).filter(|l| *l > 0.0)
+        self.info.as_ref()?.length_mm
     }
 
-    pub fn material_width(&self) -> f32 {
-        self.info
-            .as_ref()
-            .and_then(|i| i.material.as_ref())
-            .map(|m| f32::from(m.width_mm))
-            .filter(|w| *w >= 12.0)
-            .unwrap_or(15.0)
+    /// The printed band for the selected printer and its labels or tape.
+    pub fn media(&self) -> Media {
+        match self.kind {
+            Kind::E16 => Media {
+                band: HEAD_DOTS,
+                dpmm: DOTS_PER_MM as f32,
+                width_mm: self.info.as_ref().and_then(|i| i.width_mm).unwrap_or(15.0),
+            },
+            Kind::Brother => {
+                let code = self.brother_tape;
+                let (_, pins) = brother::print_area(code).unwrap_or((29, 70));
+                Media { band: pins, dpmm: brother::DOTS_PER_MM, width_mm: brother::tape_mm(code) }
+            }
+        }
     }
+
 
     /// Re-render the page and its preview if the design changed.
     fn update_page(&mut self, ctx: &egui::Context) {
-        if self.rendered.as_ref() == Some(&self.design) {
+        let media = self.media();
+        if self.rendered.as_ref().is_some_and(|(d, m)| *d == self.design && *m == media) {
             return;
         }
         let result = (|| -> Result<Page, String> {
             match self.design.mode {
-                Mode::Test => Ok(Page::test_pattern(self.design.length_mm().round() as usize)),
+                Mode::Test => Ok(Page::test_pattern_sized((self.design.length_mm() * media.dpmm).round() as usize, media.band, media.dpmm)),
                 Mode::Text | Mode::Image => {
                     if !self.ensure_font() {
                         return Err(format!("Schrift „{}“ nicht ladbar", self.design.family));
@@ -325,10 +379,10 @@ impl App {
                     };
                     let font = &self.font.as_ref().unwrap().1;
                     if self.design.auto_length {
-                        let natural = self.design.label.natural_length(font, &self.icon_font, picture);
-                        self.design.set_length_mm((natural as f32 / DOTS_PER_MM as f32).ceil());
+                        let natural = self.design.label_for(media).natural_length(font, &self.icon_font, picture);
+                        self.design.set_length_mm((natural as f32 / media.dpmm).ceil());
                     }
-                    Ok(self.design.label.render(font, &self.icon_font, picture))
+                    Ok(self.design.label_for(media).render(font, &self.icon_font, picture))
                 }
             }
         })();
@@ -349,7 +403,7 @@ impl App {
                 self.message = Some((e, true));
             }
         }
-        self.rendered = Some(self.design.clone());
+        self.rendered = Some((self.design.clone(), media));
     }
 
     /// Frame-gallery thumbnails, re-rendered when the frame settings change.
@@ -463,6 +517,11 @@ impl App {
                 }
                 Ev::Info(info) => {
                     let first = self.info.is_none();
+                    if let Some(t) = info.tape
+                        && brother::print_area(t.media_width).is_some()
+                    {
+                        self.brother_tape = t.media_width;
+                    }
                     self.info = Some(info);
                     if first && let Some(len) = self.material_length() && !self.design.auto_length {
                         self.design.set_length_mm(len);
@@ -481,7 +540,7 @@ impl App {
                         [p] => {
                             self.addr = p.addr.clone();
                             self.busy = true;
-                            self.worker.send(Cmd::Probe { addr: self.addr.clone() });
+                            self.worker.send(Cmd::Probe { addr: self.addr.clone(), kind: self.kind });
                             (format!("Drucker gefunden: {}", p.name), false)
                         }
                         _ => ("Mehrere Drucker gefunden – bitte unter dem Zahnrad wählen.".into(), false),
@@ -508,7 +567,7 @@ impl App {
         if !BROWSER_CHOOSER && valid_addr(&self.addr) {
             self.busy = true;
             self.message = None;
-            self.worker.send(Cmd::Probe { addr: self.addr.clone() });
+            self.worker.send(Cmd::Probe { addr: self.addr.clone(), kind: self.kind });
         } else {
             self.scan(false);
         }
@@ -518,7 +577,8 @@ impl App {
     fn scan(&mut self, all: bool) {
         self.busy = true;
         self.message = None;
-        self.worker.send(Cmd::Scan { all });
+        self.info = None;
+        self.worker.send(Cmd::Scan { all, kind: self.kind });
     }
 
     fn print(&mut self) {
@@ -535,7 +595,7 @@ impl App {
         }
         self.busy = true;
         self.message = None;
-        self.worker.send(Cmd::Print { addr: self.addr.clone(), page, density: self.density, copies: self.copies });
+        self.worker.send(Cmd::Print { addr: self.addr.clone(), page, density: self.density, copies: self.copies, kind: self.kind });
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
@@ -567,7 +627,7 @@ impl App {
                 } else {
                     ui.menu_button(RichText::new(I_COG).size(16.0), |ui| {
                         ui.set_min_width(260.0);
-                        if !self.connected {
+                        if !self.connected && self.kind == Kind::E16 {
                             ui.label(RichText::new("Drucker nicht in der Liste?").small().weak());
                             if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_BLUETOOTH}  Alle Geräte zeigen"))).clicked() {
                                 self.scan(true);
@@ -589,6 +649,22 @@ impl App {
                         self.device_name = None;
                         self.worker.send(Cmd::Disconnect);
                     }
+                } else if BROWSER_CHOOSER {
+                    ui.add_enabled_ui(!self.busy, |ui| {
+                        ui.menu_button(format!("{I_BLUETOOTH}  Verbinden"), |ui| {
+                            ui.set_min_width(250.0);
+                            ui.label(RichText::new("Welcher Drucker?").small().weak());
+                            for (kind, hint) in [(Kind::E16, "Bluetooth LE"), (Kind::Brother, "Bluetooth, vorher im System koppeln")] {
+                                let text = format!("{}{}", kind.title(), if kind == self.kind { "  ✔" } else { "" });
+                                if ui.button(text).on_hover_text(hint).clicked() {
+                                    self.kind = kind;
+                                    self.device_name = None;
+                                    self.scan(false);
+                                    ui.close();
+                                }
+                            }
+                        });
+                    });
                 } else if ui.add_enabled(!self.busy, egui::Button::new(format!("{I_BLUETOOTH}  Verbinden"))).clicked() {
                     self.connect();
                 }
@@ -614,18 +690,22 @@ impl App {
     fn status_chip(&self, ui: &mut egui::Ui) {
         let (color, text) = match &self.info {
             Some(i) if self.connected => {
-                let state = i.status.error().map_or("bereit".to_string(), |e| e.to_string());
-                let labels = i.material.as_ref().map_or(String::new(), |m| {
-                    format!("  ·  {} × {} mm{}", m.width_mm, m.length_mm, m.remaining.map_or(String::new(), |r| format!("  ·  Zähler {r}")))
-                });
-                let color = if i.status.error().is_some() { Color32::from_rgb(0xd9, 0x82, 0x1e) } else { OK };
-                (color, format!("{}  ·  {state}{labels}", i.name.as_deref().unwrap_or("Drucker")))
+                let state = i.error.clone().unwrap_or_else(|| "bereit".to_string());
+                let labels = match (&i.tape, i.width_mm, i.length_mm) {
+                    (Some(t), _, _) if t.media_width > 0 => format!("  ·  {}", t.tape_text()),
+                    (_, Some(w), Some(l)) => format!("  ·  {w:.0} × {l:.0} mm"),
+                    (_, Some(w), None) => format!("  ·  {w:.0} mm"),
+                    _ => String::new(),
+                };
+                let counter = i.counter.map_or(String::new(), |r| format!("  ·  Zähler {r}"));
+                let color = if i.error.is_some() { Color32::from_rgb(0xd9, 0x82, 0x1e) } else { OK };
+                (color, format!("{}  ·  {state}{labels}{counter}", i.name.as_deref().unwrap_or("Drucker")))
             }
             _ if self.connected && !self.busy => (Color32::from_rgb(0xd9, 0x82, 0x1e), "Verbunden – Drucker antwortet nicht".into()),
             _ if BROWSER_CHOOSER && self.device_name.is_some() => {
                 (Color32::GRAY, format!("{} schläft – verbindet sich beim Drucken neu", self.device_name.as_deref().unwrap_or("Drucker")))
             }
-            _ if BROWSER_CHOOSER => (Color32::GRAY, "Nicht verbunden – „Verbinden“ klicken".into()),
+            _ if BROWSER_CHOOSER => (Color32::GRAY, format!("{} nicht verbunden – „Verbinden“ klicken", self.kind.title())),
             _ if valid_addr(self.addr.trim()) => {
                 let who = self.found.iter().find(|f| f.addr == self.addr.trim()).map_or(self.addr.trim(), |f| f.name.as_str());
                 (Color32::GRAY, format!("Getrennt  ·  {who}"))
@@ -656,8 +736,10 @@ impl App {
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
         if self.narrow {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(I_ADJUST));
-                ui.add(egui::Slider::new(&mut self.density, 1..=7)).on_hover_text("Dichte: 1 = hell, 7 = dunkel");
+                if self.kind == Kind::E16 {
+                    ui.label(RichText::new(I_ADJUST));
+                    ui.add(egui::Slider::new(&mut self.density, 1..=7)).on_hover_text("Dichte: 1 = hell, 7 = dunkel");
+                }
                 ui.label(RichText::new(I_COPY));
                 ui.add(egui::DragValue::new(&mut self.copies).range(1..=99).suffix(" ×"));
             });
@@ -673,10 +755,12 @@ impl App {
             return;
         }
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{I_ADJUST}  Dichte")).strong());
-            ui.add(egui::Slider::new(&mut self.density, 1..=7).show_value(true))
-                .on_hover_text("1 = hell, 7 = dunkel (Standard 4)");
-            ui.add_space(12.0);
+            if self.kind == Kind::E16 {
+                ui.label(RichText::new(format!("{I_ADJUST}  Dichte")).strong());
+                ui.add(egui::Slider::new(&mut self.density, 1..=7).show_value(true))
+                    .on_hover_text("1 = hell, 7 = dunkel (Standard 4)");
+                ui.add_space(12.0);
+            }
             ui.label(RichText::new(format!("{I_COPY}  Kopien")).strong());
             if ui.add_enabled(self.copies > 1, egui::Button::new(I_MINUS)).clicked() {
                 self.copies -= 1;
@@ -733,7 +817,7 @@ impl App {
 
 /// The page as black-on-white pixels.
 pub fn page_image(page: &Page) -> ColorImage {
-    let (w, h) = (page.width(), HEAD_DOTS);
+    let (w, h) = (page.width(), page.height());
     let mut px = vec![Color32::WHITE; w * h];
     for x in 0..w {
         for y in 0..h {
@@ -789,7 +873,7 @@ impl eframe::App for App {
         }
 
         // Re-render right away if a control changed the design this frame.
-        if self.rendered.as_ref() != Some(&self.design) {
+        if self.rendered.as_ref().is_none_or(|(d, _)| *d != self.design) {
             ctx.request_repaint();
         }
         keyboard::end_frame(ctx);
@@ -800,7 +884,14 @@ impl eframe::App for App {
         if self.screenshot.is_some() {
             return;
         }
-        let saved = Saved { design: self.design.clone(), addr: self.addr.trim().to_owned(), density: self.density, copies: self.copies };
+        let saved = Saved {
+            design: self.design.clone(),
+            addr: self.addr.trim().to_owned(),
+            density: self.density,
+            copies: self.copies,
+            kind: self.kind,
+            brother_tape: self.brother_tape,
+        };
         eframe::set_value(storage, eframe::APP_KEY, &saved);
     }
 }
