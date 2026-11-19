@@ -123,6 +123,7 @@ impl<T: Transport> State<T> {
                     Err(e) => send(Ev::Error(e)),
                 }
             }
+            Cmd::Eject => {}
             Cmd::Disconnect => {
                 self.conn = None;
                 send(Ev::Connected(false));

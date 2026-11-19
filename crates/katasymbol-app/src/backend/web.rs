@@ -124,22 +124,30 @@ async fn handle(cmd: Cmd, shared: Shared, send: &Send) {
             forget(&shared);
             send(Ev::Connected(false));
         }
-        Cmd::Probe { kind: Kind::Brother, .. } => match with_pt(&shared, send, None).await {
+        Cmd::Probe { kind: Kind::Brother, .. } => match with_pt(&shared, send, PtJob::Status).await {
             Ok(st) => send(Ev::Info(st.into())),
             Err(e) => send(Ev::Error(e)),
         },
-        Cmd::Print { kind: Kind::Brother, page, copies, .. } => {
-            katasymbol_web::trace(format!("== Brother-Druck: {} × {} Punkte, {copies}×", page.width(), page.height()));
-            let copies = copies.max(1);
-            let mut r = Ok(brother::Status::default());
-            for n in 1..=copies {
-                let prefix = if copies > 1 { format!("Kopie {n}/{copies}: ") } else { String::new() };
-                r = with_pt(&shared, send, Some((&page, &prefix))).await;
-                if r.is_err() {
-                    break;
+        Cmd::Print { kind: Kind::Brother, page, copies, chain, .. } => {
+            let copies = copies.clamp(1, 99);
+            katasymbol_web::trace(format!(
+                "== Brother-Druck: {} × {} Punkte, {copies}×{}",
+                page.width(),
+                page.height(),
+                if chain { ", Kettendruck" } else { "" }
+            ));
+            // All copies in one job: the blank lead before the cutter is paid once.
+            match with_pt(&shared, send, PtJob::Print { page: &page, copies, chain }).await {
+                Ok(st) => {
+                    send(Ev::Printed);
+                    send(Ev::Info(st.into()));
                 }
+                Err(e) => send(Ev::Error(e)),
             }
-            match r {
+        }
+        Cmd::Eject => {
+            katasymbol_web::trace("== Brother: Etikett ausgeben");
+            match with_pt(&shared, send, PtJob::Eject).await {
                 Ok(st) => {
                     send(Ev::Printed);
                     send(Ev::Info(st.into()));
@@ -274,14 +282,29 @@ fn watch_pt(link: &SerialLink, send: &Send) {
     link.on_lost(move || send(Ev::Connected(false)));
 }
 
-/// Brother: ask for the status (`job` None) or print a page, reopening the
-/// remembered port if the connection was closed; after a link error on an
-/// older connection, reopen once and retry.
-async fn with_pt(shared: &Shared, send: &Send, job: Option<(&katasymbol_core::Page, &str)>) -> Result<brother::Status, String> {
-    async fn run(p: &mut PtPrinter<SerialLink>, job: Option<(&katasymbol_core::Page, &str)>, send: &Send) -> katasymbol_core::Result<brother::Status> {
+#[derive(Clone, Copy)]
+enum PtJob<'a> {
+    Status,
+    Print { page: &'a katasymbol_core::Page, copies: u32, chain: bool },
+    /// Push out a label held back by chain printing.
+    Eject,
+}
+
+/// Brother: run `job`, reopening the remembered port if the connection was
+/// closed; after a link error on an older connection, reopen once and retry.
+async fn with_pt(shared: &Shared, send: &Send, job: PtJob<'_>) -> Result<brother::Status, String> {
+    async fn run(p: &mut PtPrinter<SerialLink>, job: PtJob<'_>, send: &Send) -> katasymbol_core::Result<brother::Status> {
         match job {
-            None => p.status().await,
-            Some((page, prefix)) => p.print(page, JobOptions::default(), |pr| send(Ev::Progress(progress_text(prefix, pr)))).await,
+            PtJob::Status => p.status().await,
+            PtJob::Print { page, copies, chain } => {
+                let pages = vec![page; copies as usize];
+                let opts = JobOptions { chain, ..JobOptions::default() };
+                p.print_pages(&pages, opts, |pr| send(Ev::Progress(progress_text("", pr)))).await
+            }
+            PtJob::Eject => {
+                let page = brother::eject_page();
+                p.print(&page, JobOptions::default(), |pr| send(Ev::Progress(progress_text("Ausgeben: ", pr)))).await
+            }
         }
     }
     let existing = shared.borrow_mut().pt.take().filter(|p| p.stream().is_connected());

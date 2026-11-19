@@ -35,6 +35,7 @@ pub const I_UNDO: &str = "\u{f0e2}";
 pub const I_CIRCLE: &str = "\u{f111}";
 pub const I_COG: &str = "\u{f013}";
 pub const I_CUT: &str = "\u{f0c4}";
+pub const I_LINK: &str = "\u{f0c1}";
 
 pub fn setup(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();

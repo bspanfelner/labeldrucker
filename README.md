@@ -51,6 +51,12 @@ Firefox and iOS cannot (on iPhones the printer needs Apple's MFi licence).
 3. The app reads the tape cassette (width, colours) and lays the label out for
    its print area: 180 dpi, 24–128 dots across depending on the tape (3.5–24 mm).
 
+The cutter sits about 24 mm before the print head, so every job that feeds its
+label out leaves that much blank tape, cut off at the start of the next job.
+Copies go out as one job (one blank piece for all of them). *Band sparen* turns on
+chain printing: no blank piece at all, but the last label stays in the printer
+until the next one pushes it out, or *Ausgeben* (which costs one blank piece).
+
 The Brother raster protocol lives in `katasymbol-core::brother`, the Web Serial
 link in `katasymbol-web::serial`.
 

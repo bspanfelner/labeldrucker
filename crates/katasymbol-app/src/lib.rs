@@ -152,11 +152,13 @@ struct Saved {
     kind: Kind,
     /// Width code of the Brother tape last seen (12 = 12 mm).
     brother_tape: u8,
+    /// Brother chain printing: no blank lead per job.
+    brother_chain: bool,
 }
 
 impl Default for Saved {
     fn default() -> Self {
-        Self { design: Design::default(), addr: String::new(), density: 4, copies: 1, kind: Kind::E16, brother_tape: 12 }
+        Self { design: Design::default(), addr: String::new(), density: 4, copies: 1, kind: Kind::E16, brother_tape: 12, brother_chain: false }
     }
 }
 
@@ -211,6 +213,11 @@ pub struct App {
     /// The printer model to connect to and print for.
     pub kind: Kind,
     brother_tape: u8,
+    brother_chain: bool,
+    /// The last Brother job was chained: its label is still in the printer.
+    held: bool,
+    /// Whether the job under way is chained.
+    job_chained: bool,
     /// Single-column layout for phones.
     narrow: bool,
     device_name: Option<String>,
@@ -294,6 +301,9 @@ impl App {
             info: None,
             kind: if BROWSER_CHOOSER { saved.kind } else { Kind::E16 },
             brother_tape: if brother::print_area(saved.brother_tape).is_some() { saved.brother_tape } else { 12 },
+            brother_chain: saved.brother_chain,
+            held: false,
+            job_chained: false,
             narrow: false,
             device_name: None,
             found: Vec::new(),
@@ -552,7 +562,18 @@ impl App {
                     // Ready for the next job even if the status refresh after
                     // printing fails (the printer may still be finishing).
                     self.busy = false;
-                    self.message = Some(("Gedruckt.".into(), false));
+                    let was_held = self.held;
+                    self.held = self.job_chained;
+                    self.message = Some((
+                        if self.held {
+                            "Gedruckt – das Etikett bleibt im Drucker, bis das nächste es herausschiebt („Ausgeben“).".into()
+                        } else if was_held && !self.job_chained && self.kind == Kind::Brother {
+                            "Fertig – alle Etiketten sind draußen.".into()
+                        } else {
+                            "Gedruckt.".into()
+                        },
+                        false,
+                    ));
                 }
                 Ev::Error(e) => {
                     self.message = Some((e, true));
@@ -595,7 +616,33 @@ impl App {
         }
         self.busy = true;
         self.message = None;
-        self.worker.send(Cmd::Print { addr: self.addr.clone(), page, density: self.density, copies: self.copies, kind: self.kind });
+        let chain = self.kind == Kind::Brother && self.brother_chain;
+        self.job_chained = chain;
+        self.worker.send(Cmd::Print { addr: self.addr.clone(), page, density: self.density, copies: self.copies, kind: self.kind, chain });
+    }
+
+    /// Brother: push out the label chain printing held back.
+    fn eject(&mut self) {
+        self.busy = true;
+        self.message = None;
+        self.job_chained = false;
+        self.worker.send(Cmd::Eject);
+    }
+
+    /// Brother chain printing switch and, with a label held back, "Ausgeben".
+    fn chain_controls(&mut self, ui: &mut egui::Ui) {
+        ui.checkbox(&mut self.brother_chain, format!("{I_LINK}  Band sparen")).on_hover_text(
+            "Kettendruck: kein Leerstück vor jedem Etikett. Das zuletzt gedruckte Etikett bleibt im Drucker, \
+             bis das nächste es herausschiebt – oder „Ausgeben“.",
+        );
+        if self.held
+            && ui
+                .add_enabled(!self.busy, egui::Button::new(format!("{I_CUT}  Ausgeben")))
+                .on_hover_text("Schiebt das letzte Etikett heraus und schneidet es ab (kostet einmal ca. 25 mm Band).")
+                .clicked()
+        {
+            self.eject();
+        }
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
@@ -739,6 +786,8 @@ impl App {
                 if self.kind == Kind::E16 {
                     ui.label(RichText::new(I_ADJUST));
                     ui.add(egui::Slider::new(&mut self.density, 1..=7)).on_hover_text("Dichte: 1 = hell, 7 = dunkel");
+                } else {
+                    self.chain_controls(ui);
                 }
                 ui.label(RichText::new(I_COPY));
                 ui.add(egui::DragValue::new(&mut self.copies).range(1..=99).suffix(" ×"));
@@ -759,6 +808,9 @@ impl App {
                 ui.label(RichText::new(format!("{I_ADJUST}  Dichte")).strong());
                 ui.add(egui::Slider::new(&mut self.density, 1..=7).show_value(true))
                     .on_hover_text("1 = hell, 7 = dunkel (Standard 4)");
+                ui.add_space(12.0);
+            } else {
+                self.chain_controls(ui);
                 ui.add_space(12.0);
             }
             ui.label(RichText::new(format!("{I_COPY}  Kopien")).strong());
@@ -891,6 +943,7 @@ impl eframe::App for App {
             copies: self.copies,
             kind: self.kind,
             brother_tape: self.brother_tape,
+            brother_chain: self.brother_chain,
         };
         eframe::set_value(storage, eframe::APP_KEY, &saved);
     }

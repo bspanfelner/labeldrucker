@@ -194,20 +194,36 @@ fn raster_line(page: &Page, x: usize, first_pin: usize) -> [u8; LINE_BYTES] {
 }
 
 /// How a job is printed.
+///
+/// The cutter sits about 24 mm before the print head, so a job that feeds
+/// its last label out (the default) leaves that much blank tape at the
+/// cutter, and the next job cuts it off first. Several labels in one job
+/// pay for it once; [`chain`](Self::chain) not at all, but keeps the last
+/// label in the printer until the next job pushes it out (or
+/// [`eject_page`] does).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JobOptions {
-    /// Cut after the label.
+    /// Cut after each label.
     pub cut: bool,
-    /// Feed (and cut) at the end; off keeps the tape in for a following label.
-    pub feed: bool,
+    /// Chain printing: no feed and cut after the last label.
+    pub chain: bool,
     /// Blank tape before and after the print, dots (at least 14, ~2 mm).
     pub margin_dots: u16,
 }
 
 impl Default for JobOptions {
     fn default() -> Self {
-        Self { cut: true, feed: true, margin_dots: 14 }
+        Self { cut: true, chain: false, margin_dots: 14 }
     }
+}
+
+/// Shortest page the printer takes (4.4 mm), dots.
+pub const MIN_LINES: usize = 31;
+
+/// A blank page that, printed without chaining, pushes a label held back
+/// by chain printing out and cuts it off (fits every tape).
+pub fn eject_page() -> Page {
+    Page::blank_sized(MIN_LINES, 24)
 }
 
 /// Clears whatever a previous, interrupted job left in the printer's buffer.
@@ -218,51 +234,68 @@ pub const STATUS_REQUEST: [u8; 3] = [0x1B, 0x69, 0x53];
 /// All bytes of a one-label job for `page` on the tape described by
 /// `status` (width and type as the printer reported them).
 pub fn job(page: &Page, status: &Status, opts: JobOptions) -> Result<Vec<u8>> {
+    Ok(job_pages(&[page], status, opts)?.concat())
+}
+
+/// A job of several labels, split where the host has to wait for the
+/// printer: part `i` ends with label `i`'s print command, and the next part
+/// may only be sent after "printing completed" for it.
+pub fn job_pages(pages: &[&Page], status: &Status, opts: JobOptions) -> Result<Vec<Vec<u8>>> {
     let (first_pin, pins) = print_area(status.media_width)
         .ok_or_else(|| Error::Encode(format!("unsupported tape width code {}", status.media_width)))?;
-    if page.height() > pins {
-        return Err(Error::Encode(format!("page is {} dots high, the tape prints {pins}", page.height())));
+    if pages.is_empty() {
+        return Err(Error::Encode("no pages".into()));
     }
-    if page.width() == 0 {
-        return Err(Error::Encode("empty page".into()));
-    }
-    // Centre a lower page in the print area.
-    let first_pin = first_pin + (pins - page.height()) / 2;
-    let lines = page.width() as u32;
-
-    let mut out = Vec::with_capacity(200 + page.width() * 8);
-    out.extend_from_slice(&INVALIDATE);
-    out.extend_from_slice(&INITIALIZE);
-    // Raster mode.
-    out.extend_from_slice(&[0x1B, 0x69, 0x61, 0x01]);
-    // Print information: media type, width and line count are valid; recover on error.
-    let media_type = if status.media_type == 0xFF { 0x00 } else { status.media_type };
-    out.extend_from_slice(&[0x1B, 0x69, 0x7A, 0x80 | 0x04 | 0x02, media_type, status.media_width, 0x00]);
-    out.extend_from_slice(&lines.to_le_bytes());
-    out.extend_from_slice(&[0x00, 0x00]);
-    // Mode: auto cut.
-    out.extend_from_slice(&[0x1B, 0x69, 0x4D, if opts.cut { 0x40 } else { 0x00 }]);
-    // Advanced mode: no chain printing (feed and cut after the last label).
-    out.extend_from_slice(&[0x1B, 0x69, 0x4B, if opts.feed { 0x08 } else { 0x00 }]);
-    // Margin (feed amount).
-    let m = opts.margin_dots.max(14);
-    out.extend_from_slice(&[0x1B, 0x69, 0x64, m as u8, (m >> 8) as u8]);
-    // TIFF (PackBits) compression.
-    out.extend_from_slice(&[0x4D, 0x02]);
-    for x in 0..page.width() {
-        let line = raster_line(page, x, first_pin);
-        if line.iter().all(|&b| b == 0) {
-            out.push(0x5A);
-        } else {
-            let packed = packbits(&line);
-            out.push(0x47);
-            out.extend_from_slice(&(packed.len() as u16).to_le_bytes());
-            out.extend_from_slice(&packed);
+    let mut parts = Vec::with_capacity(pages.len());
+    for (i, page) in pages.iter().enumerate() {
+        if page.height() > pins {
+            return Err(Error::Encode(format!("page is {} dots high, the tape prints {pins}", page.height())));
         }
+        if page.width() == 0 {
+            return Err(Error::Encode("empty page".into()));
+        }
+        let last = i + 1 == pages.len();
+        let mut out = Vec::with_capacity(200 + page.width() * 8);
+        if i == 0 {
+            out.extend_from_slice(&INVALIDATE);
+            out.extend_from_slice(&INITIALIZE);
+        }
+        // Centre a lower page in the print area.
+        let first_pin = first_pin + (pins - page.height()) / 2;
+        let lines = page.width() as u32;
+        // Raster mode.
+        out.extend_from_slice(&[0x1B, 0x69, 0x61, 0x01]);
+        // Print information: media type, width and line count are valid; recover on error.
+        let media_type = if status.media_type == 0xFF { 0x00 } else { status.media_type };
+        out.extend_from_slice(&[0x1B, 0x69, 0x7A, 0x80 | 0x04 | 0x02, media_type, status.media_width, 0x00]);
+        out.extend_from_slice(&lines.to_le_bytes());
+        out.extend_from_slice(&[if i == 0 { 0x00 } else { 0x01 }, 0x00]);
+        // Mode: auto cut.
+        out.extend_from_slice(&[0x1B, 0x69, 0x4D, if opts.cut { 0x40 } else { 0x00 }]);
+        // Advanced mode: bit 3 = no chain printing (feed and cut after the last label).
+        out.extend_from_slice(&[0x1B, 0x69, 0x4B, if opts.chain { 0x00 } else { 0x08 }]);
+        // Margin (feed amount).
+        let m = opts.margin_dots.max(14);
+        out.extend_from_slice(&[0x1B, 0x69, 0x64, m as u8, (m >> 8) as u8]);
+        // TIFF (PackBits) compression.
+        out.extend_from_slice(&[0x4D, 0x02]);
+        for x in 0..page.width() {
+            let line = raster_line(page, x, first_pin);
+            if line.iter().all(|&b| b == 0) {
+                out.push(0x5A);
+            } else {
+                let packed = packbits(&line);
+                out.push(0x47);
+                out.extend_from_slice(&(packed.len() as u16).to_le_bytes());
+                out.extend_from_slice(&packed);
+            }
+        }
+        // Print, and after the last page also feed (chain printing decides
+        // whether that feed happens).
+        out.push(if last { 0x1A } else { 0x0C });
+        parts.push(out);
     }
-    // Print and feed.
-    out.push(if opts.feed { 0x1A } else { 0x0C });
-    Ok(out)
+    Ok(parts)
 }
 
 /// A byte-stream connection to the printer, implemented per platform.
@@ -355,7 +388,12 @@ impl<S: Stream> PtPrinter<S> {
 
     /// Print `page` (as high as the loaded tape's print area, see
     /// [`print_area`]), checking the tape first.
-    pub async fn print(&mut self, page: &Page, opts: JobOptions, mut progress: impl FnMut(Progress)) -> Result<Status> {
+    pub async fn print(&mut self, page: &Page, opts: JobOptions, progress: impl FnMut(Progress)) -> Result<Status> {
+        self.print_pages(&[page], opts, progress).await
+    }
+
+    /// Print several labels in one job (one blank lead for all of them).
+    pub async fn print_pages(&mut self, pages: &[&Page], opts: JobOptions, mut progress: impl FnMut(Progress)) -> Result<Status> {
         progress(Progress::Preparing);
         let st = self.status().await?;
         if let Some(e) = st.error() {
@@ -364,15 +402,27 @@ impl<S: Stream> PtPrinter<S> {
         if st.phase != 0 {
             return Err(Error::Printer("printer is still busy".into()));
         }
-        let data = job(page, &st, opts)?;
-        let of = data.len().div_ceil(SEND_CHUNK);
-        for (i, chunk) in data.chunks(SEND_CHUNK).enumerate() {
-            progress(Progress::Sending { buffer: i + 1, of });
-            self.stream.write(chunk).await?;
+        let parts = job_pages(pages, &st, opts)?;
+        let of: usize = parts.iter().map(|p| p.len().div_ceil(SEND_CHUNK)).sum();
+        let mut sent = 0;
+        let mut last = st;
+        for (n, part) in parts.iter().enumerate() {
+            for chunk in part.chunks(SEND_CHUNK) {
+                sent += 1;
+                progress(Progress::Sending { buffer: sent, of });
+                self.stream.write(chunk).await?;
+            }
+            if n + 1 == parts.len() {
+                progress(Progress::Finishing);
+            }
+            // "Printing completed" (or an error) comes by itself; only then
+            // may the next label follow.
+            last = self.wait_done().await?;
         }
-        progress(Progress::Finishing);
-        // The printer reports phase changes and then "printing completed"
-        // (or an error) by itself.
+        Ok(last)
+    }
+
+    async fn wait_done(&mut self) -> Result<Status> {
         let mut waited = Duration::ZERO;
         let step = Duration::from_secs(1);
         while waited < PRINT_TIMEOUT {
@@ -454,6 +504,26 @@ mod tests {
         assert_eq!(line, want);
         assert_eq!(data[raster + 4 + n], 0x5A);
         assert_eq!(*data.last().unwrap(), 0x1A);
+    }
+
+    #[test]
+    fn several_labels_share_one_job() {
+        let st = Status { media_width: 12, media_type: 1, ..Status::default() };
+        let page = Page::blank_sized(40, 70);
+        let parts = job_pages(&[&page, &page, &page], &st, JobOptions { chain: true, ..JobOptions::default() }).unwrap();
+        assert_eq!(parts.len(), 3);
+        // Invalidate and initialize once, then per page: raster mode, print info.
+        assert!(parts[0].starts_with(&INVALIDATE));
+        assert!(parts[1].starts_with(&[0x1B, 0x69, 0x61, 0x01, 0x1B, 0x69, 0x7A]));
+        // Page flag: first 0, others 1.
+        assert_eq!(parts[0][100 + 2 + 4 + 11], 0);
+        assert_eq!(parts[1][4 + 11], 1);
+        // Chain printing clears bit 3 of ESC i K.
+        let k = parts[2].windows(3).position(|w| w == [0x1B, 0x69, 0x4B]).unwrap();
+        assert_eq!(parts[2][k + 3], 0x00);
+        assert_eq!(*parts[0].last().unwrap(), 0x0C);
+        assert_eq!(*parts[1].last().unwrap(), 0x0C);
+        assert_eq!(*parts[2].last().unwrap(), 0x1A);
     }
 
     #[test]

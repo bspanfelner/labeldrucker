@@ -117,7 +117,13 @@ pub enum Cmd {
         copies: u32,
         #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
         kind: Kind,
+        /// Brother: chain printing (the last label stays in the printer).
+        #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+        chain: bool,
     },
+    /// Brother: push out and cut a label held back by chain printing.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Eject,
     Disconnect,
 }
 
